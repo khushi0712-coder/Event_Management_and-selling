@@ -24,7 +24,7 @@ function AppShell() {
         <Route path="/contact" element={<Contact />} />
         <Route path="/sell-ticket" element={<SellTicket />} />
         <Route path="/login" element={<Login />} />
-        <Route path="/profile" element={<Profile />} />
+        <Route path="/profile/*" element={<Profile />} />
         <Route path="/signup" element={<Signup />} />
       </Routes>
     </>

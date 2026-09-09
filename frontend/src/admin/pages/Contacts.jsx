@@ -1,621 +1,196 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  FiArrowRight,
-  FiMail,
-  FiPlus,
-  FiRefreshCcw,
-  FiSearch,
-  FiFilter,
-  FiChevronLeft,
-  FiTrash2,
-} from "react-icons/fi";
-import { isThisMonth, isThisWeek, isToday } from "date-fns";
+import { useEffect, useMemo, useState } from "react";
+import { isToday, isYesterday, isThisWeek, isThisMonth } from "date-fns";
+import { FiAlertCircle, FiCheckCircle, FiChevronDown, FiFilter, FiInbox, FiPlus, FiRefreshCcw, FiSearch, FiTrash2, FiX } from "react-icons/fi";
 import api from "../../services/api";
-import ContactDetails from "../components/ContactDetails";
-import ContactListItem from "../components/ContactListItem";
+import ContactDetailsDrawer from "../components/ContactDetailsDrawer";
 
-const FILTER_OPTIONS = ["All", "Unread", "Read", "Replied", "Pending"];
-const PRIORITY_OPTIONS = ["All", "Normal", "Important", "Urgent"];
-const DATE_OPTIONS = ["All time", "Today", "This week", "This month"];
-const SORT_OPTIONS = ["Newest", "Oldest", "Unread first", "Priority"];
+const statuses = ["All", "Unread", "Read", "Awaiting Reply", "Replied", "Resolved", "Archived"];
+const priorities = ["All", "Normal", "Important", "Urgent"];
+const dates = ["All time", "Today", "Yesterday", "This week", "This month"];
+const sorts = ["Latest activity", "Oldest activity", "Newest contact", "Highest priority"];
+const priorityWeight = { Urgent: 0, Important: 1, Normal: 2 };
 
-const getInitialMetadata = (contacts) => {
-  return contacts.reduce((memo, item) => {
-    const read = item.read ?? false;
-    const status = item.status || (read ? "Read" : "Unread");
-    memo[item._id] = {
-      read,
-      status,
-      priority: item.priority || "Normal",
-      replied: item.status === "Replied" || item.replied === true || false,
-    };
-    return memo;
-  }, {});
-};
-
-const getPriorityWeight = (priority) => {
-  if (priority === "Urgent") return 0;
-  if (priority === "Important") return 1;
-  return 2;
-};
-
-const getContactSubject = (contact) => {
-  if (contact.subject) return contact.subject;
-  if (!contact.message) return "No subject";
-  return contact.message.split("\n")[0].slice(0, 68) || "No subject";
+const statusOf = (contact) => contact.status || (contact.read ? "Read" : "Unread");
+const activityDate = (contact) => contact.lastActivityAt || contact.updatedAt || contact.createdAt;
+const initials = (name = "") => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "C";
+const formatDate = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return isToday(date) ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : date.toLocaleDateString([], { day: "numeric", month: "short" });
 };
 
 const Contacts = () => {
   const [contacts, setContacts] = useState([]);
-  const [metadata, setMetadata] = useState({});
-  const [selectedContactId, setSelectedContactId] = useState(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
-  const [priorityFilter, setPriorityFilter] = useState("All");
-  const [dateFilter, setDateFilter] = useState("All time");
-  const [sortBy, setSortBy] = useState("Newest");
-  const [selectedIds, setSelectedIds] = useState([]);
+  const [stats, setStats] = useState({});
+  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("All");
+  const [priority, setPriority] = useState("All");
+  const [date, setDate] = useState("All time");
+  const [sort, setSort] = useState("Latest activity");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [activeId, setActiveId] = useState(null);
   const [replyText, setReplyText] = useState("");
   const [replySending, setReplySending] = useState(false);
-  const [deletePrompt, setDeletePrompt] = useState(null);
+  const [composeOpen, setComposeOpen] = useState(false);
+  const [composeSending, setComposeSending] = useState(false);
+  const [confirm, setConfirm] = useState(null);
   const [toast, setToast] = useState(null);
 
-  const replySupported = false;
+  const notify = (message, type = "success") => {
+    setToast({ message, type });
+    window.setTimeout(() => setToast(null), 2800);
+  };
 
-  const loadContacts = useCallback(async () => {
+  const load = async (quiet = false) => {
     try {
-      setLoading(true);
+      quiet ? setRefreshing(true) : setLoading(true);
       setError("");
-      const response = await api.get("/api/contact/admin");
-      const data = Array.isArray(response.data) ? response.data : response.data?.data || [];
-      setContacts(data);
-      setMetadata(getInitialMetadata(data));
-      setSelectedContactId(data[0]?._id || null);
+      const [contactResponse, userResponse] = await Promise.all([api.get("/api/contact/admin"), api.get("/api/admin/users")]);
+      const payload = contactResponse.data;
+      setContacts(Array.isArray(payload) ? payload : payload.data || []);
+      setStats(payload.stats || {});
+      setUsers(Array.isArray(userResponse.data) ? userResponse.data : userResponse.data?.data || []);
     } catch (err) {
-      setError(err?.response?.data?.message || "Unable to load messages. Please try again.");
-      setContacts([]);
-      setMetadata({});
-      setSelectedContactId(null);
+      setError(err?.response?.data?.message || "Unable to load conversations.");
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
-  }, []);
+  };
 
+  useEffect(() => { load(); }, []);
   useEffect(() => {
-    loadContacts();
-  }, [loadContacts]);
+    const timer = window.setTimeout(() => setSearch(query.trim().toLowerCase()), 300);
+    return () => window.clearTimeout(timer);
+  }, [query]);
 
-  const showToast = (type, message) => {
-    setToast({ type, message });
-    window.setTimeout(() => setToast(null), 2600);
-  };
+  const visible = useMemo(() => contacts.filter((contact) => {
+    const text = [contact.name, contact.email, contact.phone, contact.message, contact.user?.name, contact.user?.email].filter(Boolean).join(" ").toLowerCase();
+    const created = new Date(contact.createdAt);
+    if (search && !text.includes(search)) return false;
+    if (status !== "All" && statusOf(contact) !== status) return false;
+    if (priority !== "All" && (contact.priority || "Normal") !== priority) return false;
+    if (date === "Today" && !isToday(created)) return false;
+    if (date === "Yesterday" && !isYesterday(created)) return false;
+    if (date === "This week" && !isThisWeek(created, { weekStartsOn: 1 })) return false;
+    if (date === "This month" && !isThisMonth(created)) return false;
+    return true;
+  }).sort((first, second) => {
+    const firstTime = new Date(activityDate(first)).getTime();
+    const secondTime = new Date(activityDate(second)).getTime();
+    if (sort === "Oldest activity") return firstTime - secondTime;
+    if (sort === "Newest contact") return new Date(second.createdAt) - new Date(first.createdAt);
+    if (sort === "Highest priority") return (priorityWeight[first.priority || "Normal"] - priorityWeight[second.priority || "Normal"]) || secondTime - firstTime;
+    return secondTime - firstTime;
+  }), [contacts, search, status, priority, date, sort]);
 
-  const updateMetadata = (id, patch) => {
-    setMetadata((current) => ({
-      ...current,
-      [id]: {
-        ...(current[id] || { read: false, status: "Unread", priority: "Normal", replied: false }),
-        ...patch,
-      },
-    }));
-  };
-
-  const contactsWithMeta = useMemo(
-    () =>
-      contacts.map((contact) => ({
-        ...contact,
-        meta: metadata[contact._id] || { read: false, status: "Unread", priority: "Normal", replied: false },
-      })),
-    [contacts, metadata],
-  );
-
-  const filteredContacts = useMemo(() => {
-    const term = searchQuery.trim().toLowerCase();
-    return contactsWithMeta
-      .filter((contact) => {
-        const raw = `${contact.name || ""} ${contact.email || ""} ${contact.subject || contact.message || ""}`.toLowerCase();
-        const matchesSearch = !term || raw.includes(term);
-        if (!matchesSearch) return false;
-
-        const status = contact.meta.status || "Unread";
-        if (statusFilter !== "All" && status !== statusFilter) return false;
-
-        const priority = contact.meta.priority || "Normal";
-        if (priorityFilter !== "All" && priority !== priorityFilter) return false;
-
-        const created = new Date(contact.createdAt);
-        if (dateFilter === "Today" && !isToday(created)) return false;
-        if (dateFilter === "This week" && !isThisWeek(created, { weekStartsOn: 1 })) return false;
-        if (dateFilter === "This month" && !isThisMonth(created)) return false;
-
-        return true;
-      })
-      .sort((a, b) => {
-        if (sortBy === "Newest") return new Date(b.createdAt) - new Date(a.createdAt);
-        if (sortBy === "Oldest") return new Date(a.createdAt) - new Date(b.createdAt);
-        if (sortBy === "Unread first") {
-          const aUnread = a.meta.status === "Unread" ? 0 : 1;
-          const bUnread = b.meta.status === "Unread" ? 0 : 1;
-          if (aUnread !== bUnread) return aUnread - bUnread;
-          return new Date(b.createdAt) - new Date(a.createdAt);
-        }
-        if (sortBy === "Priority") {
-          const diff = getPriorityWeight(a.meta.priority) - getPriorityWeight(b.meta.priority);
-          return diff || new Date(b.createdAt) - new Date(a.createdAt);
-        }
-        return 0;
-      });
-  }, [contactsWithMeta, dateFilter, priorityFilter, searchQuery, sortBy, statusFilter]);
-
-  useEffect(() => {
-    if (!selectedContactId && filteredContacts.length > 0) {
-      setSelectedContactId(filteredContacts[0]._id);
+  const active = contacts.find((contact) => contact._id === activeId) || null;
+  const patchContact = (updated) => setContacts((current) => current.map((contact) => contact._id === updated._id ? updated : contact));
+  const mutate = async (id, endpoint, body, message) => {
+    try {
+      const response = await api.patch(`/api/contact/${id}/${endpoint}`, body);
+      patchContact(response.data);
+      notify(message);
+      return true;
+    } catch (err) {
+      notify(err?.response?.data?.message || "Unable to update conversation.", "error");
+      return false;
     }
-    if (selectedContactId && !filteredContacts.some((item) => item._id === selectedContactId)) {
-      setSelectedContactId(filteredContacts[0]?._id || null);
-    }
-  }, [filteredContacts, selectedContactId]);
-
-  const activeContact = useMemo(
-    () => contacts.find((item) => item._id === selectedContactId) || filteredContacts[0] || null,
-    [contacts, filteredContacts, selectedContactId],
-  );
-
-  const stats = useMemo(() => {
-    const total = contacts.length;
-    const unread = contactsWithMeta.filter((item) => item.meta.status === "Unread").length;
-    const replied = contactsWithMeta.filter((item) => item.meta.status === "Replied").length;
-    const today = contactsWithMeta.filter((item) => isToday(new Date(item.createdAt))).length;
-    return { total, unread, replied, today };
-  }, [contactsWithMeta, contacts]);
-
-  const customerThreadInfo = useMemo(() => {
-    if (!activeContact) return null;
-    const thread = contacts.filter((item) => item.email === activeContact.email);
-    const lastContact = thread.reduce((latest, item) => {
-      const current = new Date(item.createdAt);
-      return current > latest ? current : latest;
-    }, new Date(activeContact.createdAt));
-    return {
-      messages: thread.length,
-      lastContact: lastContact.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
-    };
-  }, [activeContact, contacts]);
-
-  const selectedCount = selectedIds.length;
-
-  const handleSelectOne = (id, checked) => {
-    setSelectedIds((current) => {
-      if (checked) {
-        return current.includes(id) ? current : [...current, id];
-      }
-      return current.filter((item) => item !== id);
-    });
   };
 
-  const handleToggleAll = () => {
-    if (selectedIds.length === filteredContacts.length) {
-      setSelectedIds([]);
-      return;
-    }
-    setSelectedIds(filteredContacts.map((item) => item._id));
+  const openConversation = async (contact) => {
+    setActiveId(contact._id);
+    if (statusOf(contact) === "Unread") await mutate(contact._id, "status", { status: "Read" }, "Conversation marked as read.");
   };
 
-  const handleBulkUpdate = (patch, message) => {
-    setMetadata((current) => {
-      const next = { ...current };
-      selectedIds.forEach((id) => {
-        next[id] = {
-          ...(next[id] || { read: false, status: "Unread", priority: "Normal", replied: false }),
-          ...patch,
-        };
-      });
-      return next;
-    });
-    showToast("success", message);
-  };
-
-  const handleDelete = (ids) => {
-    setDeletePrompt({ ids, title: "Delete this message?", description: "This conversation will be permanently removed." });
-  };
-
-  const confirmDelete = () => {
-    if (!deletePrompt) return;
-    setContacts((current) => current.filter((item) => !deletePrompt.ids.includes(item._id)));
-    setMetadata((current) => {
-      const next = { ...current };
-      deletePrompt.ids.forEach((id) => delete next[id]);
-      return next;
-    });
-    setSelectedIds((current) => current.filter((id) => !deletePrompt.ids.includes(id)));
-    if (deletePrompt.ids.includes(selectedContactId)) {
-      setSelectedContactId(null);
-    }
-    showToast("success", `${deletePrompt.ids.length} message${deletePrompt.ids.length === 1 ? "" : "s"} deleted.`);
-    setDeletePrompt(null);
-  };
-
-  const handleReplySend = async () => {
-    if (!activeContact) return;
-    if (!replyText.trim()) return;
-    if (!replySupported) {
-      showToast("error", "Reply support is not available in the current API.");
-      return;
-    }
+  const sendReply = async () => {
+    if (!active || !replyText.trim() || replySending) return false;
     try {
       setReplySending(true);
-      await api.post(`/api/contact/${activeContact._id}/reply`, { body: replyText });
-      showToast("success", "Reply sent successfully.");
+      const response = await api.post(`/api/contact/${active._id}/reply`, { message: replyText.trim() });
+      patchContact(response.data);
       setReplyText("");
+      notify("Reply sent.");
+      return true;
     } catch (err) {
-      showToast("error", err?.response?.data?.message || "Unable to send reply.");
-    } finally {
-      setReplySending(false);
+      notify(err?.response?.data?.message || "Unable to send reply.", "error");
+      return false;
+    } finally { setReplySending(false); }
+  };
+
+  const updateReply = async (reply) => {
+    try {
+      const response = await api.patch(`/api/contact/${active._id}/reply/${reply._id}`, { message: reply.message });
+      patchContact(response.data);
+      notify("Reply updated.");
+      return true;
+    } catch (err) {
+      notify(err?.response?.data?.message || "Unable to update reply.", "error");
+      return false;
     }
   };
 
-  const renderToolbar = () => (
-    <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0">
-          <p className="text-sm font-medium uppercase tracking-[0.35em] text-orange-400">Contacts</p>
-          <h1 className="mt-3 text-3xl font-semibold text-white sm:text-4xl">Contact inbox</h1>
-          <p className="mt-3 max-w-2xl text-sm text-slate-400">
-            Manage customer inquiries, support requests and contact messages from one place.
-          </p>
-          <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-orange-400/20 bg-orange-500/10 px-3 py-2 text-sm text-orange-300">
-            <span className="h-2.5 w-2.5 rounded-full bg-orange-400" />
-            Inbox connected
-          </div>
-        </div>
+  const deleteReply = async (replyId) => {
+    try {
+      const response = await api.delete(`/api/contact/${active._id}/reply/${replyId}`);
+      patchContact(response.data);
+      notify("Reply deleted.");
+      return true;
+    } catch (err) {
+      notify(err?.response?.data?.message || "Unable to delete reply.", "error");
+      return false;
+    }
+  };
 
-        <div className="flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={() => showToast("info", "Compose is coming soon for admin replies.")}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-          >
-            <FiPlus className="h-4 w-4 text-orange-300" />
-            Compose
-          </button>
-          <button
-            type="button"
-            onClick={loadContacts}
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-          >
-            <FiRefreshCcw className="h-4 w-4 text-orange-300" />
-            Refresh
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+  const bulk = async (action, value) => {
+    try {
+      await api.post("/api/contact/admin/bulk-action", { ids: selectedIds, action, value });
+      setSelectedIds([]);
+      await load(true);
+      notify("Bulk action completed.");
+    } catch (err) { notify(err?.response?.data?.message || "Unable to complete bulk action.", "error"); }
+  };
 
-  const renderStats = () => (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {[
-        { label: "Total Messages", value: stats.total, accent: "orange", icon: FiMail },
-        { label: "Unread", value: stats.unread, accent: "slate", icon: FiMail },
-        { label: "Replied", value: stats.replied, accent: "slate", icon: FiArrowRight },
-        { label: "Today", value: stats.today, accent: "slate", icon: FiRefreshCcw },
-      ].map((item) => (
-        <div
-          key={item.label}
-          className="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20 transition duration-200 hover:-translate-y-0.5 hover:border-orange-400/20"
-        >
-          <div className="flex items-center justify-between">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950/70 text-orange-300">
-              <item.icon className="h-5 w-5" />
-            </span>
-            <span className="rounded-full border border-white/10 bg-slate-950/70 px-2.5 py-1.5 text-xs uppercase tracking-[0.25em] text-slate-400">
-              {item.label}
-            </span>
-          </div>
-          <p className="mt-6 text-4xl font-semibold text-white">{item.value}</p>
-          <p className="mt-2 text-sm text-slate-400">{item.label} from inbox</p>
-        </div>
-      ))}
-    </div>
-  );
+  const deleteConfirmed = async () => {
+    if (!confirm) return;
+    try {
+      if (confirm.ids.length === 1) await api.delete(`/api/contact/${confirm.ids[0]}`);
+      else await api.post("/api/contact/admin/bulk-action", { ids: confirm.ids, action: "delete" });
+      if (confirm.ids.includes(activeId)) setActiveId(null);
+      setConfirm(null);
+      setSelectedIds([]);
+      await load(true);
+      notify("Conversation deleted.");
+    } catch (err) { notify(err?.response?.data?.message || "Unable to delete conversation.", "error"); }
+  };
 
-  const renderEmptyState = () => (
-    <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-8 text-center shadow-2xl shadow-black/20">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950/80 text-orange-300">
-        <FiMail className="h-7 w-7" />
-      </div>
-      <h2 className="mt-6 text-2xl font-semibold text-white">No messages yet</h2>
-      <p className="mt-3 text-sm text-slate-400">
-        Customer inquiries will appear here when someone contacts you.
-      </p>
-      <button
-        type="button"
-        onClick={loadContacts}
-        className="mt-6 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-      >
-        <FiRefreshCcw className="h-4 w-4 text-orange-300" />
-        Refresh inbox
-      </button>
-    </div>
-  );
+  const clearFilters = () => { setQuery(""); setStatus("All"); setPriority("All"); setDate("All time"); };
+  const statsList = [["Total", stats.total, "All", "All"], ["Unread", stats.unread, "Need attention", "Unread"], ["Awaiting reply", stats.awaitingReply, "Needs response", "Awaiting Reply"], ["Replied", stats.replied, "Handled", "Replied"], ["Resolved", stats.resolved, "Closed", "Resolved"], ["Archived", stats.archived, "Out of inbox", "Archived"]];
 
-  const renderNoResults = () => (
-    <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-8 text-center shadow-2xl shadow-black/20">
-      <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950/80 text-orange-300">
-        <FiFilter className="h-7 w-7" />
-      </div>
-      <h2 className="mt-6 text-2xl font-semibold text-white">No matching messages</h2>
-      <p className="mt-3 text-sm text-slate-400">
-        Try changing your filters or search query.
-      </p>
-      <button
-        type="button"
-        onClick={() => {
-          setStatusFilter("All");
-          setPriorityFilter("All");
-          setDateFilter("All time");
-          setSearchQuery("");
-        }}
-        className="mt-6 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-      >
-        Clear filters
-      </button>
-    </div>
-  );
+  return <div className="mx-auto max-w-7xl space-y-5 text-slate-100">
+    <header className="flex flex-col gap-4 border-b border-white/[0.08] pb-5 lg:flex-row lg:items-end lg:justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-300">Communication</p><h1 className="mt-2 text-3xl font-semibold text-white">Contact messages</h1><p className="mt-1 text-sm text-slate-500">Manage customer conversations and respond to inquiries.</p></div><div className="flex gap-2"><button onClick={() => load(true)} disabled={refreshing} className="inline-flex h-10 items-center gap-2 rounded-lg border border-white/[0.1] px-3 text-sm text-slate-300 hover:bg-white/[0.05]"><FiRefreshCcw className={refreshing ? "animate-spin" : ""} />Refresh</button><button onClick={() => setComposeOpen(true)} className="inline-flex h-10 items-center gap-2 rounded-lg bg-orange-500 px-4 text-sm font-semibold text-slate-950 hover:bg-orange-400"><FiPlus />New message</button></div></header>
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">{statsList.map(([label, value, hint, filter]) => <button key={label} onClick={() => filter === "All" ? clearFilters() : setStatus(filter)} className={`rounded-xl border p-4 text-left transition hover:border-orange-400/30 ${status === filter ? "border-orange-400/30 bg-orange-500/[0.08]" : "border-white/[0.07] bg-[#0b1422]"}`}><span className="text-[10px] font-bold uppercase tracking-[0.15em] text-slate-500">{label}</span><strong className="mt-2 block text-2xl text-white">{value ?? 0}</strong><span className="text-[11px] text-slate-600">{hint}</span></button>)}</div>
+    <section className="overflow-hidden rounded-2xl border border-white/[0.08] bg-[#0b1422]"><div className="flex flex-col gap-3 border-b border-white/[0.07] p-4 lg:flex-row"><div className="relative flex-1"><FiSearch className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-600" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email, phone or message" className="h-11 w-full rounded-lg border border-white/[0.08] bg-[#070e19] pl-10 pr-9 text-sm outline-none placeholder:text-slate-600 focus:border-orange-400/30" />{query && <button aria-label="Clear search" onClick={() => setQuery("")} className="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-slate-500"><FiX /></button>}</div><button onClick={() => setFiltersOpen((open) => !open)} className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-white/[0.08] px-4 text-sm text-slate-400 hover:text-white"><FiFilter />Filters</button><label className="relative"><span className="sr-only">Sort conversations</span><select value={sort} onChange={(event) => setSort(event.target.value)} className="h-11 w-full appearance-none rounded-lg border border-white/[0.08] bg-[#070e19] px-3 pr-9 text-sm text-slate-300 lg:w-48">{sorts.map((item) => <option key={item}>{item}</option>)}</select><FiChevronDown className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-slate-600" /></label></div>{filtersOpen && <div className="grid gap-3 border-b border-white/[0.07] bg-[#09111e] p-4 sm:grid-cols-3">{[["Status", status, setStatus, statuses], ["Priority", priority, setPriority, priorities], ["Date", date, setDate, dates]].map(([label, value, setter, options]) => <label key={label} className="text-xs text-slate-500">{label}<select value={value} onChange={(event) => setter(event.target.value)} className="mt-2 h-10 w-full rounded-lg border border-white/10 bg-[#070e19] px-3 text-sm text-slate-300">{options.map((option) => <option key={option}>{option}</option>)}</select></label>)}</div>}
+      {selectedIds.length > 0 && <div className="flex flex-wrap items-center gap-2 border-b border-orange-400/20 bg-orange-500/[0.06] p-3"><strong className="mr-auto text-sm text-white">{selectedIds.length} selected</strong><button onClick={() => bulk("status", "Read")} className="rounded-md border border-white/10 px-3 py-2 text-xs">Mark read</button><button onClick={() => bulk("status", "Unread")} className="rounded-md border border-white/10 px-3 py-2 text-xs">Mark unread</button><button onClick={() => bulk("status", "Archived")} className="rounded-md border border-white/10 px-3 py-2 text-xs">Archive</button><button onClick={() => setConfirm({ ids: selectedIds })} className="rounded-md border border-red-400/20 px-3 py-2 text-xs text-red-300"><FiTrash2 /></button><button aria-label="Clear selection" onClick={() => setSelectedIds([])} className="p-2 text-slate-500"><FiX /></button></div>}
+      <div className="divide-y divide-white/[0.06]">{loading ? <div className="space-y-3 p-4">{[1, 2, 3].map((item) => <div key={item} className="h-20 animate-pulse rounded-lg bg-white/[0.04]" />)}</div> : error ? <div className="p-10 text-center text-sm text-red-300"><FiAlertCircle className="mx-auto mb-2" />{error}<button onClick={() => load()} className="mt-3 block mx-auto text-orange-300">Try again</button></div> : visible.length === 0 ? <div className="p-14 text-center"><FiInbox className="mx-auto mb-3 text-slate-600" /><p className="text-sm text-slate-300">{contacts.length ? "No conversations found" : "You're all caught up"}</p></div> : visible.map((contact) => { const unread = statusOf(contact) === "Unread"; return <div key={contact._id} className="flex items-center gap-3 p-4 transition hover:bg-white/[0.03]"><input aria-label={`Select ${contact.name || "conversation"}`} type="checkbox" checked={selectedIds.includes(contact._id)} onChange={(event) => setSelectedIds((current) => event.target.checked ? [...current, contact._id] : current.filter((id) => id !== contact._id))} className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-orange-500" /><button onClick={() => openConversation(contact)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-500/10 text-sm font-bold text-orange-300">{initials(contact.name)}</span><span className="min-w-0 flex-1"><strong className={`block truncate text-sm ${unread ? "text-white" : "text-slate-300"}`}>{contact.name || "Unknown user"}</strong><span className="mt-1 block truncate text-xs text-slate-500">{contact.message || "No message content"}</span><span className="mt-1 block truncate text-[11px] text-slate-600">{contact.email} <em className="ml-2 not-italic text-slate-500">{statusOf(contact)}</em></span></span><span className="flex shrink-0 flex-col items-end gap-2 text-[11px] text-slate-600">{formatDate(activityDate(contact))}{unread && <span className="h-2 w-2 rounded-full bg-orange-400" />}</span></button></div>; })}</div>
+    </section>
+    {active && <ContactDetailsDrawer message={active} customerInfo={active.user || active} onClose={() => setActiveId(null)} onMarkRead={() => mutate(active._id, "status", { status: statusOf(active) === "Unread" ? "Read" : "Unread" }, "Status updated.")} onMarkReplied={() => mutate(active._id, "status", { status: "Replied" }, "Marked as replied.")} onResolve={() => mutate(active._id, "status", { status: statusOf(active) === "Resolved" ? "Read" : "Resolved" }, "Resolution updated.")} onArchive={() => mutate(active._id, "status", { status: statusOf(active) === "Archived" ? "Read" : "Archived" }, "Archive status updated.")} onDelete={() => setConfirm({ ids: [active._id] })} onReplyEdit={updateReply} onReplyDelete={deleteReply} replyText={replyText} onReplyChange={setReplyText} onReplySend={sendReply} replySending={replySending} />}
+    {composeOpen && <Compose users={users} sending={composeSending} onClose={() => setComposeOpen(false)} onSubmit={async (data) => { try { setComposeSending(true); const response = await api.post("/api/contact/admin/send", data); setComposeOpen(false); await load(true); setActiveId(response.data._id); notify("Message sent."); } catch (err) { notify(err?.response?.data?.message || "Unable to send message.", "error"); } finally { setComposeSending(false); } }} />}
+    {confirm && <div className="fixed inset-0 z-[210] grid place-items-center bg-black/70 p-4"><div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#101927] p-5"><FiTrash2 className="text-red-400" /><h2 className="mt-4 text-lg font-semibold text-white">Delete conversation?</h2><p className="mt-2 text-sm text-slate-500">This conversation will be permanently removed.</p><div className="mt-5 flex justify-end gap-2"><button onClick={() => setConfirm(null)} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm">Cancel</button><button onClick={deleteConfirmed} className="rounded-lg bg-red-500 px-4 py-2.5 text-sm font-semibold">Delete</button></div></div></div>}
+    {toast && <div className={`fixed bottom-5 right-5 z-[300] flex items-center gap-2 rounded-xl border px-4 py-3 text-sm shadow-2xl ${toast.type === "error" ? "border-red-400/20 bg-red-950 text-red-200" : "border-emerald-400/20 bg-emerald-950 text-emerald-200"}`}><FiCheckCircle />{toast.message}</div>}
+  </div>;
+};
 
-  return (
-    <div className="space-y-6">
-      {renderToolbar()}
-
-      {loading ? (
-        <div className="space-y-4">
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {Array.from({ length: 4 }).map((_, index) => (
-              <div key={index} className="h-32 animate-pulse rounded-3xl border border-white/10 bg-slate-900/70 p-5" />
-            ))}
-          </div>
-          <div className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-            <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 h-12 animate-pulse rounded-2xl bg-slate-950/80" />
-              {Array.from({ length: 5 }).map((_, index) => (
-                <div key={index} className="mb-3 h-24 animate-pulse rounded-3xl bg-slate-950/80" />
-              ))}
-            </div>
-            <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 h-12 animate-pulse rounded-2xl bg-slate-950/80" />
-              <div className="space-y-3">
-                {Array.from({ length: 6 }).map((_, index) => (
-                  <div key={index} className="h-14 animate-pulse rounded-2xl bg-slate-950/80" />
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-      ) : error ? (
-        <div className="rounded-3xl border border-rose-500/20 bg-rose-500/10 p-6 shadow-2xl shadow-black/20">
-          <h2 className="text-xl font-semibold text-white">Unable to load messages</h2>
-          <p className="mt-2 text-sm text-slate-200">Something went wrong while loading the contact inbox.</p>
-          <button
-            type="button"
-            onClick={loadContacts}
-            className="mt-4 inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-          >
-            Retry
-          </button>
-        </div>
-      ) : (
-        <>
-          {renderStats()}
-
-          <div className="grid gap-4 lg:grid-cols-[1.3fr_0.95fr]">
-            <section className="space-y-4 rounded-3xl border border-white/10 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="text-sm font-semibold uppercase tracking-[0.35em] text-orange-400">Inbox</p>
-                  <h2 className="mt-2 text-xl font-semibold text-white">Messages</h2>
-                </div>
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-                  <div className="relative min-w-[220px]">
-                    <FiSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-orange-400" />
-                    <input
-                      type="search"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="Search messages, name or email..."
-                      className="w-full rounded-2xl border border-white/10 bg-slate-950/80 py-3 pl-10 pr-4 text-sm text-white outline-none transition focus:border-orange-400/30 focus:ring-2 focus:ring-orange-400/10"
-                    />
-                  </div>
-                  <div className="grid gap-2 sm:grid-cols-3">
-                    <select
-                      value={statusFilter}
-                      onChange={(e) => setStatusFilter(e.target.value)}
-                      className="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-sm text-white outline-none transition focus:border-orange-400/30 focus:ring-2 focus:ring-orange-400/10"
-                    >
-                      {FILTER_OPTIONS.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={priorityFilter}
-                      onChange={(e) => setPriorityFilter(e.target.value)}
-                      className="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-sm text-white outline-none transition focus:border-orange-400/30 focus:ring-2 focus:ring-orange-400/10"
-                    >
-                      {PRIORITY_OPTIONS.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                    <select
-                      value={dateFilter}
-                      onChange={(e) => setDateFilter(e.target.value)}
-                      className="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-sm text-white outline-none transition focus:border-orange-400/30 focus:ring-2 focus:ring-orange-400/10"
-                    >
-                      {DATE_OPTIONS.map((option) => (
-                        <option key={option} value={option}>{option}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-3 rounded-3xl border border-white/10 bg-slate-950/50 p-4 md:flex-row md:items-center md:justify-between">
-                <div className="flex items-center gap-2 text-sm text-slate-400">
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={selectedIds.length > 0 && selectedIds.length === filteredContacts.length}
-                      onChange={handleToggleAll}
-                      className="h-4 w-4 cursor-pointer rounded border-white/20 bg-slate-900 text-orange-500 focus:ring-2 focus:ring-orange-400/20"
-                    />
-                    Select all
-                  </label>
-                  <span>{filteredContacts.length} messages found</span>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-3 text-sm text-white outline-none transition focus:border-orange-400/30 focus:ring-2 focus:ring-orange-400/10"
-                  >
-                    {SORT_OPTIONS.map((option) => (
-                      <option key={option} value={option}>{option}</option>
-                    ))}
-                  </select>
-                  {selectedCount > 0 && (
-                    <div className="inline-flex flex-wrap items-center gap-2 rounded-2xl border border-orange-400/25 bg-orange-500/10 px-3 py-2 text-sm text-orange-200">
-                      <span>{selectedCount} selected</span>
-                      <button
-                        type="button"
-                        onClick={() => handleBulkUpdate({ read: true, status: "Read" }, "Marked selected messages as read.")}
-                        className="rounded-full bg-slate-950/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-900/95"
-                      >
-                        Mark read
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleBulkUpdate({ read: false, status: "Unread" }, "Marked selected messages as unread.")}
-                        className="rounded-full bg-slate-950/80 px-3 py-2 text-xs font-semibold text-white transition hover:bg-slate-900/95"
-                      >
-                        Mark unread
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleDelete(selectedIds)}
-                        className="rounded-full bg-rose-500/10 px-3 py-2 text-xs font-semibold text-rose-200 transition hover:bg-rose-500/20"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {filteredContacts.length === 0 ? (
-                renderNoResults()
-              ) : (
-                <div className="space-y-3">
-                  {filteredContacts.map((contact) => (
-                    <ContactListItem
-                      key={contact._id}
-                      contact={contact}
-                      metadata={contact.meta}
-                      selected={selectedIds.includes(contact._id)}
-                      active={activeContact?._id === contact._id}
-                      onSelect={handleSelectOne}
-                      onClick={() => setSelectedContactId(contact._id)}
-                    />
-                  ))}
-                </div>
-              )}
-            </section>
-
-            <section className="space-y-4">
-              <div className="hidden lg:block">
-                <ContactDetails
-                  contact={activeContact}
-                  metadata={activeContact ? metadata[activeContact._id] : null}
-                  customerInfo={customerThreadInfo}
-                  onClose={() => setSelectedContactId(null)}
-                  onMarkRead={() => activeContact && updateMetadata(activeContact._id, { read: !metadata[activeContact._id]?.read, status: metadata[activeContact._id]?.read ? "Unread" : "Read" })}
-                  onMarkReplied={() => activeContact && updateMetadata(activeContact._id, { replied: true, status: "Replied" })}
-                  onPriorityChange={(value) => activeContact && updateMetadata(activeContact._id, { priority: value })}
-                  onDelete={() => activeContact && handleDelete([activeContact._id])}
-                  replyText={replyText}
-                  onReplyChange={setReplyText}
-                  onReplySend={handleReplySend}
-                  replySending={replySending}
-                  replySupported={replySupported}
-                />
-              </div>
-
-              {activeContact && (
-                <div className="lg:hidden">
-                  <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-4 shadow-2xl shadow-black/20">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedContactId(null)}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-                    >
-                      <FiChevronLeft className="h-4 w-4 text-orange-300" />
-                      Back to inbox
-                    </button>
-                  </div>
-                  <div className="mt-4">
-                    <ContactDetails
-                      contact={activeContact}
-                      metadata={activeContact ? metadata[activeContact._id] : null}
-                      customerInfo={customerThreadInfo}
-                      onClose={() => setSelectedContactId(null)}
-                      onMarkRead={() => activeContact && updateMetadata(activeContact._id, { read: !metadata[activeContact._id]?.read, status: metadata[activeContact._id]?.read ? "Unread" : "Read" })}
-                      onMarkReplied={() => activeContact && updateMetadata(activeContact._id, { replied: true, status: "Replied" })}
-                      onPriorityChange={(value) => activeContact && updateMetadata(activeContact._id, { priority: value })}
-                      onDelete={() => activeContact && handleDelete([activeContact._id])}
-                      replyText={replyText}
-                      onReplyChange={setReplyText}
-                      onReplySend={handleReplySend}
-                      replySending={replySending}
-                      replySupported={replySupported}
-                    />
-                  </div>
-                </div>
-              )}
-            </section>
-          </div>
-        </>
-      )}
-
-      {toast && (
-        <div className="fixed right-4 top-6 z-50 rounded-3xl border border-white/10 bg-slate-950/95 px-4 py-3 text-sm text-white shadow-2xl shadow-black/50">
-          {toast.message}
-        </div>
-      )}
-
-      {deletePrompt && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-slate-950/90 px-4 py-6">
-          <div className="w-full max-w-lg rounded-[2rem] border border-white/10 bg-slate-900/95 p-6 shadow-2xl shadow-black/40">
-            <h3 className="text-xl font-semibold text-white">{deletePrompt.title}</h3>
-            <p className="mt-3 text-sm leading-6 text-slate-400">{deletePrompt.description}</p>
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => setDeletePrompt(null)}
-                className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmDelete}
-                className="rounded-2xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-400/90"
-              >
-                Delete Message
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
+const Compose = ({ users, sending, onClose, onSubmit }) => {
+  const [data, setData] = useState({ userId: "", name: "", email: "", message: "" });
+  const selectUser = (event) => { const user = users.find((item) => item._id === event.target.value); setData(user ? { ...data, userId: user._id, name: user.name, email: user.email } : { ...data, userId: "", name: "", email: "" }); };
+  return <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4" onClick={() => !sending && onClose()}><form onSubmit={(event) => { event.preventDefault(); if (data.email && data.message.trim()) onSubmit(data); }} onClick={(event) => event.stopPropagation()} className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#101927] p-5"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold text-white">New message</h2><button type="button" aria-label="Close composer" onClick={onClose} className="p-2 text-slate-500"><FiX /></button></div><select required value={data.userId} onChange={selectUser} className="mt-5 h-11 w-full rounded-lg border border-white/10 bg-[#070e19] px-3 text-sm text-slate-200"><option value="">Select existing user</option>{users.filter((user) => user.role !== "admin").map((user) => <option key={user._id} value={user._id}>{user.name} · {user.email}</option>)}</select><textarea required maxLength={5000} value={data.message} onChange={(event) => setData({ ...data, message: event.target.value })} placeholder="Write a message..." rows={7} className="mt-3 w-full resize-none rounded-lg border border-white/10 bg-[#070e19] p-3 text-sm text-slate-200" /><div className="mt-2 text-right text-[11px] text-slate-600">{data.message.length}/5000</div><div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onClose} className="rounded-lg border border-white/10 px-4 py-2.5 text-sm">Cancel</button><button disabled={sending} className="rounded-lg bg-orange-500 px-4 py-2.5 text-sm font-semibold text-slate-950">{sending ? "Sending..." : "Send message"}</button></div></form></div>;
 };
 
 export default Contacts;

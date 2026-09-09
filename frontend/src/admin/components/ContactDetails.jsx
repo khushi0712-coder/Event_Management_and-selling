@@ -1,7 +1,9 @@
 import {
+  FiCheck,
   FiCheckCircle,
-  FiMail,
-  FiPhone,
+  FiChevronDown,
+  FiMoreVertical,
+  FiSearch,
   FiSend,
   FiTrash2,
   FiX,
@@ -9,239 +11,966 @@ import {
 
 const priorityOptions = ["Normal", "Important", "Urgent"];
 
-const formatDateTime = (value) => {
-  if (!value) return "Not available";
+const getInitial = (name = "") =>
+  name.trim().charAt(0).toUpperCase() || "C";
+
+const formatTime = (value) => {
+  if (!value) return "";
+
   const date = new Date(value);
-  return date.toLocaleString("en-GB", {
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toLocaleTimeString("en-IN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const formatDate = (value) => {
+  if (!value) return "";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return "";
+
+  return date.toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
   });
 };
 
 const ContactDetails = ({
   contact,
   metadata = {},
-  customerInfo,
+
   onClose,
   onMarkRead,
   onMarkReplied,
   onPriorityChange,
   onDelete,
-  replyText,
+
+  replyText = "",
   onReplyChange,
   onReplySend,
-  replySending,
+  replySending = false,
+
+  /* Keep for compatibility with parent.
+     IMPORTANT: do NOT use this to disable reply. */
   replySupported,
 }) => {
   if (!contact) {
     return (
-      <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
-        <div className="h-full min-h-[360px]">
-          <p className="text-sm font-medium uppercase tracking-[0.35em] text-orange-400">Message details</p>
-          <h2 className="mt-4 text-2xl font-semibold text-white">Choose a conversation</h2>
-          <p className="mt-3 text-sm text-slate-400">
-            Select a message from the inbox to review the full details and reply.
-          </p>
-        </div>
+      <div className="flex h-full items-center justify-center bg-[#070c16] text-sm text-slate-500">
+        Select a conversation
       </div>
     );
   }
 
-  const status = metadata.status || (metadata.read ? "Read" : "Unread");
-  const priority = metadata.priority || "Normal";
-  const subject = contact.subject || contact.message?.split("\n")[0]?.slice(0, 72) || "No subject";
-  const content = contact.message || "No message content provided.";
+  const name = contact.name || "Unknown user";
+
+  const initials = getInitial(name);
+
+  const status =
+    metadata.status ||
+    (metadata.read ? "Read" : "Unread");
+
+  const priority =
+    metadata.priority || "Normal";
+
+  const content =
+    contact.message ||
+    "No message available.";
+
+  const isUnread = status === "Unread";
+
+  /* =====================================================
+     SEND REPLY
+  ===================================================== */
+
+  const handleSendReply = async () => {
+    const text = replyText.trim();
+
+    if (!text || replySending) return;
+
+    /*
+      IMPORTANT:
+      We intentionally DO NOT check replySupported.
+      If parent has onReplySend, it will execute.
+    */
+
+    if (typeof onReplySend !== "function") {
+      console.error(
+        "ContactDetails: onReplySend callback is missing."
+      );
+      return;
+    }
+
+    try {
+      const result = await onReplySend();
+
+      /*
+        Parent can return false when API fails.
+        In that case keep the typed message.
+      */
+      if (result === false) return;
+
+      onReplyChange?.("");
+    } catch (error) {
+      console.error("Reply failed:", error);
+    }
+  };
+
+  /* =====================================================
+     ENTER TO SEND
+  ===================================================== */
+
+  const handleKeyDown = (event) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey
+    ) {
+      event.preventDefault();
+
+      handleSendReply();
+    }
+  };
 
   return (
-    <div className="rounded-3xl border border-white/10 bg-slate-900/70 p-6 shadow-2xl shadow-black/20">
-      <div className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex h-16 w-16 items-center justify-center rounded-3xl bg-slate-950/80 text-2xl font-semibold text-white">
-            {contact.name?.split(" ").slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "US"}
-          </div>
-          <div>
-            <p className="text-sm font-medium uppercase tracking-[0.35em] text-orange-400">Customer</p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">{contact.name || "Unknown user"}</h2>
-            <p className="mt-1 text-sm text-slate-400">{contact.email || "No email provided"}</p>
-          </div>
-        </div>
+    <>
+      <style>
+        {`
+          .contact-scroll::-webkit-scrollbar {
+            width: 5px;
+          }
 
-        <button
-          type="button"
-          onClick={onClose}
-          className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
+          .contact-scroll::-webkit-scrollbar-track {
+            background: transparent;
+          }
+
+          .contact-scroll::-webkit-scrollbar-thumb {
+            background: rgba(148,163,184,.18);
+            border-radius: 999px;
+          }
+
+          .contact-scroll {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(148,163,184,.18) transparent;
+          }
+
+          .reply-scroll::-webkit-scrollbar {
+            width: 4px;
+          }
+
+          .reply-scroll::-webkit-scrollbar-thumb {
+            background: rgba(148,163,184,.2);
+            border-radius: 999px;
+          }
+        `}
+      </style>
+
+      {/* ===================================================
+          MAIN CONTAINER
+      =================================================== */}
+
+      <section
+        className="
+          flex
+          h-full
+          min-h-0
+          w-full
+          flex-col
+          overflow-hidden
+
+          rounded-[24px]
+
+          border
+          border-white/[0.08]
+
+          bg-[#070c16]
+
+          text-white
+
+          shadow-[0_25px_80px_rgba(0,0,0,.35)]
+        "
+      >
+
+        {/* =================================================
+            TOP HEADER
+            ONLY ONE HEADER
+        ================================================= */}
+
+        <header
+          className="
+            flex
+            h-[76px]
+            shrink-0
+
+            items-center
+            justify-between
+
+            border-b
+            border-white/[0.07]
+
+            bg-[#0a111d]
+
+            px-5
+          "
         >
-          <FiX className="h-4 w-4 text-orange-300" /> Close
-        </button>
-      </div>
+          {/* USER */}
 
-      <div className="mt-6 grid gap-4 sm:grid-cols-[1.18fr_0.82fr]">
-        <div className="space-y-4">
-          <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold uppercase tracking-[0.35em] text-slate-400">Status</p>
-                <p className="mt-2 text-lg font-semibold text-white">{status}</p>
+          <div
+            className="
+              flex
+              min-w-0
+              items-center
+              gap-3
+            "
+          >
+            {/* AVATAR */}
+
+            <div
+              className="
+                flex
+                h-10
+                w-10
+                shrink-0
+
+                items-center
+                justify-center
+
+                rounded-xl
+
+                bg-[#211b18]
+
+                text-sm
+                font-bold
+
+                text-orange-300
+              "
+            >
+              {initials}
+            </div>
+
+            {/* USER INFO */}
+
+            <div className="min-w-0">
+              <p
+                className="
+                  truncate
+
+                  text-[15px]
+                  font-semibold
+
+                  text-white
+                "
+              >
+                {name}
+              </p>
+
+              <p
+                className="
+                  mt-0.5
+
+                  truncate
+
+                  text-[11px]
+
+                  text-slate-600
+                "
+              >
+                {contact.email || ""}
+              </p>
+            </div>
+          </div>
+
+          {/* HEADER ACTIONS */}
+
+          <div
+            className="
+              flex
+              items-center
+              gap-1
+            "
+          >
+            {/* MORE */}
+
+            <details className="relative">
+              <summary
+                className="
+                  flex
+                  h-9
+                  w-9
+
+                  cursor-pointer
+                  list-none
+
+                  items-center
+                  justify-center
+
+                  rounded-full
+
+                  text-slate-500
+
+                  transition
+
+                  hover:bg-white/[0.05]
+                  hover:text-white
+
+                  [&::-webkit-details-marker]:hidden
+                "
+              >
+                <FiMoreVertical className="h-[17px] w-[17px]" />
+              </summary>
+
+              <div
+                className="
+                  absolute
+                  right-0
+                  top-11
+                  z-[100]
+
+                  w-[205px]
+
+                  rounded-2xl
+
+                  border
+                  border-white/[0.08]
+
+                  bg-[#101827]
+
+                  p-1.5
+
+                  shadow-[0_20px_60px_rgba(0,0,0,.5)]
+                "
+              >
+
+                {/* MARK READ */}
+
+                <button
+                  type="button"
+                  onClick={onMarkRead}
+                  className="
+                    flex
+                    w-full
+                    items-center
+                    gap-3
+
+                    rounded-xl
+
+                    px-3
+                    py-2.5
+
+                    text-left
+                    text-xs
+
+                    text-slate-300
+
+                    transition
+
+                    hover:bg-white/[0.05]
+                    hover:text-white
+                  "
+                >
+                  <FiCheckCircle
+                    className="
+                      h-4
+                      w-4
+                      text-emerald-400
+                    "
+                  />
+
+                  {isUnread
+                    ? "Mark as read"
+                    : "Mark as unread"}
+                </button>
+
+                {/* REPLIED */}
+
+                <button
+                  type="button"
+                  onClick={onMarkReplied}
+                  className="
+                    flex
+                    w-full
+                    items-center
+                    gap-3
+
+                    rounded-xl
+
+                    px-3
+                    py-2.5
+
+                    text-left
+                    text-xs
+
+                    text-slate-300
+
+                    transition
+
+                    hover:bg-white/[0.05]
+                    hover:text-white
+                  "
+                >
+                  <FiCheck
+                    className="
+                      h-4
+                      w-4
+                      text-sky-400
+                    "
+                  />
+
+                  Mark as replied
+                </button>
+
+                <div
+                  className="
+                    my-1.5
+                    h-px
+                    bg-white/[0.06]
+                  "
+                />
+
+                {/* PRIORITY */}
+
+                <div className="relative px-1 py-1">
+                  <select
+                    value={priority}
+                    onChange={(event) =>
+                      onPriorityChange?.(
+                        event.target.value
+                      )
+                    }
+                    className="
+                      w-full
+
+                      appearance-none
+
+                      rounded-xl
+
+                      border
+                      border-white/[0.08]
+
+                      bg-[#080e19]
+
+                      px-3
+                      py-2.5
+                      pr-8
+
+                      text-xs
+                      text-slate-300
+
+                      outline-none
+                    "
+                  >
+                    {priorityOptions.map(
+                      (option) => (
+                        <option
+                          key={option}
+                          value={option}
+                          className="bg-[#080e19]"
+                        >
+                          {option}
+                        </option>
+                      )
+                    )}
+                  </select>
+
+                  <FiChevronDown
+                    className="
+                      pointer-events-none
+
+                      absolute
+                      right-3
+                      top-1/2
+
+                      h-3.5
+                      w-3.5
+
+                      -translate-y-1/2
+
+                      text-slate-600
+                    "
+                  />
+                </div>
+
+                <div
+                  className="
+                    my-1.5
+                    h-px
+                    bg-white/[0.06]
+                  "
+                />
+
+                {/* DELETE */}
+
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  className="
+                    flex
+                    w-full
+                    items-center
+                    gap-3
+
+                    rounded-xl
+
+                    px-3
+                    py-2.5
+
+                    text-left
+                    text-xs
+
+                    text-red-400
+
+                    transition
+
+                    hover:bg-red-500/[0.08]
+                  "
+                >
+                  <FiTrash2 className="h-4 w-4" />
+
+                  Delete message
+                </button>
               </div>
-              <span className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-slate-900/80 px-3 py-1 text-sm font-semibold text-slate-200">
-                <FiCheckCircle className="h-4 w-4 text-orange-300" /> {priority}
+            </details>
+
+            {/* CLOSE */}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="
+                flex
+                h-9
+                w-9
+
+                items-center
+                justify-center
+
+                rounded-full
+
+                text-slate-500
+
+                transition
+
+                hover:bg-white/[0.06]
+                hover:text-white
+              "
+            >
+              <FiX className="h-[18px] w-[18px]" />
+            </button>
+          </div>
+        </header>
+
+        {/* =================================================
+            CHAT
+        ================================================= */}
+
+        <main
+          className="
+            contact-scroll
+
+            min-h-0
+            flex-1
+
+            overflow-y-auto
+
+            px-5
+            py-5
+          "
+        >
+          <div className="mx-auto max-w-[650px]">
+
+            {/* DATE */}
+
+            <div
+              className="
+                mb-7
+
+                flex
+                justify-center
+              "
+            >
+              <span
+                className="
+                  rounded-lg
+
+                  border
+                  border-white/[0.07]
+
+                  bg-[#111a29]
+
+                  px-3
+                  py-1
+
+                  text-[9px]
+                  font-medium
+
+                  text-slate-500
+                "
+              >
+                {formatDate(contact.createdAt)}
               </span>
             </div>
-            <div className="mt-5 flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onMarkRead}
-                className="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-              >
-                {metadata.read ? "Mark unread" : "Mark read"}
-              </button>
-              <button
-                type="button"
-                onClick={onMarkReplied}
-                className="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-              >
-                Mark replied
-              </button>
-              <select
-                value={priority}
-                onChange={(e) => onPriorityChange(e.target.value)}
-                className="rounded-2xl border border-white/10 bg-slate-950/80 px-3 py-2 text-sm text-white outline-none transition hover:border-orange-400/30 focus:border-orange-400/30 focus:ring-2 focus:ring-orange-400/10"
-              >
-                {priorityOptions.map((option) => (
-                  <option key={option} value={option} className="bg-slate-900 text-white">
-                    {option}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={onDelete}
-                className="ml-auto rounded-2xl bg-rose-500 px-3 py-2 text-sm font-semibold text-white transition hover:bg-rose-400/90"
-              >
-                <FiTrash2 className="mr-2 inline h-4 w-4" /> Delete
-              </button>
-            </div>
-          </div>
 
-          <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-6">
-            <p className="text-sm font-medium uppercase tracking-[0.35em] text-orange-400">Subject</p>
-            <h3 className="mt-3 text-xl font-semibold text-white">{subject}</h3>
-            <div className="mt-6 space-y-4 rounded-3xl bg-slate-900/80 p-4 text-sm leading-7 text-slate-200">
-              <div className="flex items-center gap-2 text-sm text-slate-400">
-                <FiMail className="h-4 w-4 text-orange-300" />
-                <span>Message received</span>
-              </div>
-              <p>{content}</p>
-            </div>
-            <div className="mt-5 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl bg-slate-900/80 p-4">
-                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Received</p>
-                <p className="mt-2 text-sm font-medium text-white">{formatDateTime(contact.createdAt)}</p>
-              </div>
-              <div className="rounded-2xl bg-slate-900/80 p-4">
-                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Message ID</p>
-                <p className="mt-2 truncate text-sm font-medium text-white">{contact._id}</p>
-              </div>
-            </div>
-          </div>
+            {/* CUSTOMER MESSAGE */}
 
-          <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-5">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium uppercase tracking-[0.35em] text-orange-400">Reply</p>
-                <p className="mt-2 text-sm text-slate-400">Write a response for the customer.</p>
-              </div>
-              <span className="text-xs uppercase tracking-[0.35em] text-slate-500">{replyText.length}/1200</span>
-            </div>
-            <textarea
-              value={replyText}
-              onChange={(e) => onReplyChange(e.target.value)}
-              rows={5}
-              placeholder="Write your reply..."
-              className="mt-4 w-full resize-none rounded-3xl border border-white/10 bg-slate-900/80 p-4 text-sm text-white outline-none transition focus:border-orange-400/30 focus:ring-2 focus:ring-orange-400/10"
-            />
-            <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-xs text-slate-500">{replySupported ? "Send a timely response to the customer." : "Reply support is not available in the current API."}</p>
-              <div className="flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => onReplyChange("")}
-                  className="rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-2 text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
+            <div
+              className="
+                flex
+                justify-start
+              "
+            >
+              <div
+                className="
+                  max-w-[80%]
+                "
+              >
+
+                {/* SMALL NAME */}
+
+                <p
+                  className="
+                    mb-1.5
+                    ml-1
+
+                    text-[9px]
+
+                    text-slate-600
+                  "
                 >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={onReplySend}
-                  disabled={!replyText.trim() || replySending || !replySupported}
-                  className="inline-flex items-center gap-2 rounded-2xl bg-orange-500 px-4 py-2 text-sm font-semibold text-slate-950 transition hover:bg-orange-400 disabled:cursor-not-allowed disabled:bg-orange-500/40"
-                >
-                  <FiSend className="h-4 w-4" />
-                  {replySending ? "Sending..." : "Send"}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
+                  {name}
+                </p>
 
-        <aside className="space-y-4">
-          <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-5">
-            <p className="text-sm font-medium uppercase tracking-[0.35em] text-orange-400">Customer information</p>
-            <div className="mt-5 space-y-4">
-              <div className="rounded-3xl bg-slate-900/80 p-4">
-                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Name</p>
-                <p className="mt-1 text-sm font-medium text-white">{contact.name || "Not available"}</p>
-              </div>
-              <div className="rounded-3xl bg-slate-900/80 p-4">
-                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Email</p>
-                <p className="mt-1 text-sm font-medium text-white">{contact.email || "Not available"}</p>
-              </div>
-              <div className="rounded-3xl bg-slate-900/80 p-4">
-                <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Phone</p>
-                <p className="mt-1 text-sm font-medium text-white">{contact.phone || "Not available"}</p>
-              </div>
-              <div className="rounded-3xl bg-slate-900/80 p-4">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs uppercase tracking-[0.35em] text-slate-500">Previous messages</p>
-                  <span className="rounded-full bg-slate-800/80 px-2.5 py-1 text-xs font-semibold uppercase text-slate-300">{customerInfo?.messages ?? 1}</span>
+                {/* BUBBLE */}
+
+                <div
+                  className="
+                    rounded-2xl
+                    rounded-tl-[5px]
+
+                    border
+                    border-white/[0.06]
+
+                    bg-[#151f30]
+
+                    px-4
+                    py-3
+
+                    shadow-[0_5px_20px_rgba(0,0,0,.15)]
+                  "
+                >
+                  <div
+                    className="
+                      flex
+                      items-end
+                      gap-3
+                    "
+                  >
+                    <p
+                      className="
+                        whitespace-pre-wrap
+                        break-words
+
+                        text-[13px]
+                        leading-[1.6]
+
+                        text-slate-100
+                      "
+                    >
+                      {content}
+                    </p>
+
+                    <span
+                      className="
+                        shrink-0
+
+                        text-[9px]
+
+                        text-slate-600
+                      "
+                    >
+                      {formatTime(
+                        contact.createdAt
+                      )}
+                    </span>
+                  </div>
                 </div>
-                <p className="mt-3 text-sm text-slate-400">Last contacted {customerInfo?.lastContact || "Not available"}</p>
               </div>
             </div>
-          </div>
 
-          <div className="rounded-3xl border border-white/10 bg-slate-950/80 p-5">
-            <p className="text-sm font-medium uppercase tracking-[0.35em] text-orange-400">Quick actions</p>
-            <div className="mt-4 space-y-3">
+            {/* EXISTING REPLIES */}
+
+            {Array.isArray(contact.replies) &&
+              contact.replies.length > 0 && (
+                <div className="mt-4 space-y-3">
+                  {contact.replies.map(
+                    (reply, index) => (
+                      <div
+                        key={
+                          reply._id ||
+                          reply.id ||
+                          index
+                        }
+                        className="
+                          flex
+                          justify-end
+                        "
+                      >
+                        <div
+                          className="
+                            max-w-[80%]
+
+                            rounded-2xl
+                            rounded-tr-[5px]
+
+                            border
+                            border-orange-400/[0.10]
+
+                            bg-[#251e1a]
+
+                            px-4
+                            py-3
+                          "
+                        >
+                          <div
+                            className="
+                              flex
+                              items-end
+                              gap-3
+                            "
+                          >
+                            <p
+                              className="
+                                whitespace-pre-wrap
+                                break-words
+
+                                text-[13px]
+                                leading-[1.6]
+
+                                text-slate-100
+                              "
+                            >
+                              {reply.message ||
+                                reply.text ||
+                                ""}
+                            </p>
+
+                            <span
+                              className="
+                                shrink-0
+
+                                text-[9px]
+
+                                text-slate-600
+                              "
+                            >
+                              {formatTime(
+                                reply.createdAt
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+
+          </div>
+        </main>
+
+        {/* =================================================
+            REPLY COMPOSER
+            ALWAYS AVAILABLE
+        ================================================= */}
+
+        <footer
+          className="
+            shrink-0
+
+            border-t
+            border-white/[0.07]
+
+            bg-[#0a111d]
+
+            px-4
+            py-3
+          "
+        >
+          <div
+            className="
+              mx-auto
+              max-w-[650px]
+            "
+          >
+
+            {/* COMPOSER */}
+
+            <div
+              className="
+                flex
+                items-end
+                gap-2
+
+                rounded-[20px]
+
+                border
+                border-white/[0.08]
+
+                bg-[#111927]
+
+                p-2
+
+                transition
+
+                focus-within:border-orange-400/[0.20]
+                focus-within:ring-2
+                focus-within:ring-orange-400/[0.04]
+              "
+            >
+              {/* TEXT */}
+
+              <textarea
+                value={replyText}
+                onChange={(event) =>
+                  onReplyChange?.(
+                    event.target.value
+                  )
+                }
+                onKeyDown={handleKeyDown}
+                rows={1}
+                maxLength={1200}
+                disabled={replySending}
+                placeholder="Type a message..."
+                className="
+                  reply-scroll
+
+                  min-h-[40px]
+                  max-h-[120px]
+
+                  flex-1
+
+                  resize-none
+
+                  bg-transparent
+
+                  px-2.5
+                  py-2
+
+                  text-[13px]
+                  leading-5
+
+                  text-white
+
+                  outline-none
+
+                  placeholder:text-slate-600
+
+                  disabled:opacity-50
+                "
+              />
+
+              {/* SEND */}
+
               <button
                 type="button"
-                onClick={onMarkRead}
-                className="w-full rounded-2xl border border-white/10 bg-slate-900/80 px-4 py-3 text-left text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
+                onClick={handleSendReply}
+                disabled={
+                  !replyText.trim() ||
+                  replySending
+                }
+                className="
+                  flex
+                  h-10
+                  w-10
+                  shrink-0
+
+                  items-center
+                  justify-center
+
+                  rounded-full
+
+                  bg-orange-400
+
+                  text-[#0b1018]
+
+                  shadow-[0_5px_20px_rgba(251,146,60,.12)]
+
+                  transition
+
+                  hover:bg-orange-300
+
+                  active:scale-95
+
+                  disabled:
+                    cursor-not-allowed
+
+                  disabled:opacity-30
+                "
+                title="Send reply"
               >
-                {metadata.read ? "Mark unread" : "Mark read"}
-              </button>
-              <button
-                type="button"
-                onClick={onMarkReplied}
-                className="w-full rounded-2xl border border-white/10 bg-slate-900/80 px-4 py-3 text-left text-sm font-semibold text-white transition hover:border-orange-400/30 hover:bg-orange-500/10"
-              >
-                Mark replied
-              </button>
-              <button
-                type="button"
-                onClick={onDelete}
-                className="w-full rounded-2xl bg-rose-500 px-4 py-3 text-left text-sm font-semibold text-white transition hover:bg-rose-400/90"
-              >
-                Delete message
+                {replySending ? (
+                  <span
+                    className="
+                      h-4
+                      w-4
+
+                      animate-spin
+
+                      rounded-full
+
+                      border-2
+                      border-black/20
+                      border-t-black
+                    "
+                  />
+                ) : (
+                  <FiSend className="h-4 w-4" />
+                )}
               </button>
             </div>
+
+            {/* HINT */}
+
+            <div
+              className="
+                mt-1.5
+
+                flex
+                items-center
+                justify-between
+
+                px-2
+              "
+            >
+              <span
+                className="
+                  text-[8px]
+                  text-slate-700
+                "
+              >
+                Enter to send · Shift + Enter
+                for new line
+              </span>
+
+              <span
+                className="
+                  text-[8px]
+                  tabular-nums
+                  text-slate-700
+                "
+              >
+                {replyText.length}/1200
+              </span>
+            </div>
+
           </div>
-        </aside>
-      </div>
-    </div>
+        </footer>
+      </section>
+    </>
   );
 };
 

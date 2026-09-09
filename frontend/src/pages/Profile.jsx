@@ -1,442 +1,83 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { FiCalendar, FiMapPin, FiEye, FiSearch } from "react-icons/fi";
-
-/*
-  Redesigned Profile page — Event Experience Dashboard
-  - Inline small components: ProfileHero, EventPassCard, StatusPill
-  - Uses real API data; preserves edit & view-ticket functionality
-*/
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
+import { FiActivity, FiArrowRight, FiCalendar, FiCheckCircle, FiChevronDown, FiCreditCard, FiEdit3, FiGrid, FiLogOut, FiMapPin, FiSearch, FiSettings, FiShield, FiShoppingBag, FiTag, FiUser, FiX } from "react-icons/fi";
+import { clearToken, getToken } from "../services/auth";
 
 const API = import.meta.env.VITE_API_URL || "";
+const imageUrl = (image) => !image ? "" : /^https?:\/\//.test(image) ? image : `${API.replace(/\/$/, "")}${image.startsWith("/") ? image : `/uploads/${image}`}`;
+const titleOf = (booking) => booking?.event?.title || booking?.eventName || "Untitled event";
+const dateOf = (booking) => new Date(booking?.event?.date || booking?.eventDate || 0).valueOf() || 0;
+const dateText = (value) => value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Date pending";
+const quantityOf = (booking) => Number(booking?.ticketCount ?? booking?.tickets ?? 1);
+const totalOf = (booking) => Number(booking?.totalAmount ?? booking?.totalPrice ?? quantityOf(booking) * (booking?.event?.price || 0)) || 0;
 
-const getImageUrl = (image) => {
-  if (!image) return "";
-  if (image.startsWith("http://") || image.startsWith("https://")) return image;
-  if (image.startsWith("/uploads/")) return `${API}${image}`;
-  return `${API.replace(/\/$/, "")}/uploads/${image}`;
-};
+function Status({ value }) {
+  const status = value || "Pending";
+  const tone = ["Confirmed", "Approved", "Active"].includes(status) ? "success" : ["Cancelled", "Rejected"].includes(status) ? "danger" : "pending";
+  return <span className={`status-badge status-${tone}`}><span aria-hidden="true">●</span>{status}</span>;
+}
+function Avatar({ user, large = false }) {
+  const initials = (user?.name || user?.email || "U").split(" ").map((part) => part[0]).slice(0, 2).join("").toUpperCase();
+  return user?.avatar ? <img className={`profile-avatar ${large ? "profile-avatar-large" : ""}`} src={imageUrl(user.avatar)} alt={user.name || "Profile"} /> : <div className={`profile-avatar ${large ? "profile-avatar-large" : ""}`}>{initials}</div>;
+}
+function EmptyState({ icon: Icon = FiActivity, title, children }) { return <div className="empty-state">{React.createElement(Icon, { size: 25 })}<strong>{title}</strong>{children}</div>; }
+function Modal({ title, children, onClose }) { return <div className="modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><div className="modal-panel" role="dialog" aria-modal="true"><div className="modal-heading"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Close"><FiX /></button></div>{children}</div></div>; }
+function Panel({ title, icon: Icon = FiActivity, children }) { return <section className="dashboard-panel"><div className="panel-heading"><h2>{title}</h2>{React.createElement(Icon)}</div>{children}</section>; }
+function Info({ label, value }) { return <div className="info-line"><span>{label}</span><strong>{value || "Not available"}</strong></div>; }
+function BookingRow({ booking }) { return <article className="booking-row"><div className="event-thumb">{imageUrl(booking.event?.image) ? <img src={imageUrl(booking.event.image)} alt="" /> : <FiCalendar />}</div><div className="booking-main"><strong>{titleOf(booking)}</strong><span><FiCalendar />{dateText(booking.event?.date || booking.eventDate)} <FiMapPin />{booking.event?.location || booking.location || "Venue pending"}</span><small>#{String(booking._id || "").slice(-8)} · {quantityOf(booking)} ticket{quantityOf(booking) === 1 ? "" : "s"}</small></div><Status value={booking.bookingStatus} /></article>; }
 
-const StatusPill = ({ status }) => {
-  const base = "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold";
-  if (!status) return <span className={`${base} bg-amber-600/10 text-amber-300 border border-amber-600/10`}>● {"Awaiting"}</span>;
-  if (status === "Confirmed") return <span className={`${base} text-emerald-300 bg-emerald-700/6`}>✓ Confirmed</span>;
-  if (status === "Cancelled") return <span className={`${base} text-red-300 bg-red-700/6`}>✕ Cancelled</span>;
-  return <span className={`${base} text-amber-300 bg-amber-600/8`}>● Awaiting confirmation</span>;
-};
-
-const PaymentPill = ({ payment }) => {
-  const base = "inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-semibold";
-  if (!payment) return <span className={`${base} bg-red-700/6 text-red-300`}>● Unpaid</span>;
-  if (payment === "Paid") return <span className={`${base} bg-emerald-700/6 text-emerald-300`}>● Paid</span>;
-  return <span className={`${base} bg-red-700/6 text-red-300`}>● {payment}</span>;
-};
-
-const ProfileHero = ({ user, stats, onEdit }) => {
-  const initials = (user?.name || user?.email || "").split(" ").map(p => p[0]).slice(0,2).join("").toUpperCase() || "U";
-
-  return (
-    <section className="relative overflow-hidden rounded-2xl border border-white/6 bg-slate-900/80 p-6 shadow-[0_16px_50px_rgba(0,0,0,0.6)]">
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top_left,_rgba(59,130,246,0.02),_transparent_30%)]" />
-      <div className="absolute -left-16 -top-10 h-60 w-60 rounded-full bg-orange-500/6 blur-3xl pointer-events-none" />
-
-      <div className="relative z-10 flex flex-col md:flex-row md:items-center md:justify-between gap-6">
-        <div className="flex items-center gap-4 min-w-0">
-          <div className="relative flex-shrink-0">
-            <div className="h-28 w-28 rounded-full bg-gradient-to-br from-slate-800/40 to-slate-900/40 flex items-center justify-center text-3xl font-semibold text-white ring-1 ring-white/6">
-              {initials}
-            </div>
-            <div className="absolute inset-0 rounded-full blur-[10px] bg-orange-500/8 -z-10" />
-          </div>
-
-          <div className="min-w-0">
-            <p className="text-sm text-slate-400">Welcome back,</p>
-            <h2 className="truncate text-2xl md:text-3xl font-semibold text-white">{user?.name || user?.email}</h2>
-            <p className="mt-1 text-sm text-slate-400 truncate">{user?.email}</p>
-
-            <div className="mt-3 flex items-center gap-3">
-              <span className="inline-flex items-center rounded-full bg-slate-800/60 px-3 py-1 text-xs font-semibold text-slate-300 border border-white/6">{user?.role || "member"}</span>
-              <button
-                onClick={onEdit}
-                className="inline-flex items-center gap-2 rounded-full bg-transparent border border-white/8 px-3 py-1 text-sm font-semibold text-orange-400 hover:bg-orange-500/6 transition"
-              >
-                Edit Profile
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-6 text-center">
-          {stats.map((s) => (
-            <div key={s.title} className="min-w-[84px]">
-              <p className="text-2xl md:text-3xl font-extrabold text-white leading-none">{s.value}</p>
-              <p className="mt-1 text-xs tracking-wide text-slate-400">{s.title.toUpperCase()}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
-  );
-};
-
-const EventPassCard = ({ booking, onView }) => {
-  const formatDate = (v) => {
-    if (!v) return "—";
-    const d = new Date(v);
-    if (Number.isNaN(d.valueOf())) return v;
-    return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-  };
-
-  const formatCurrency = (value) => `₹ ${Number(value || 0).toLocaleString()}`;
-
-  const poster = getImageUrl(booking?.event?.image || booking?.event?.imageUrl || booking?.event?.poster || null);
-  const tickets = booking.ticketCount ?? booking.tickets ?? 1;
-  const amountFromBooking = booking.totalAmount ?? booking.totalPrice;
-  const fallback = tickets * (booking.event?.price ?? 0);
-  const amount = amountFromBooking || fallback || 0;
-
-  return (
-    <article className="group overflow-hidden rounded-[1.8rem] border border-white/10 bg-slate-950/90 shadow-[0_24px_80px_rgba(0,0,0,0.45)] transition-transform duration-300 hover:-translate-y-1">
-      <div className="relative overflow-hidden bg-slate-900/10">
-        {poster ? (
-          <img src={poster} alt={booking.event?.title || booking.eventName} className="h-72 w-full object-cover object-center sm:h-80" />
-        ) : (
-          <div className="flex h-72 w-full items-center justify-center bg-slate-900 text-slate-500 text-xs uppercase tracking-[0.18em] sm:h-80">No poster available</div>
-        )}
-        <div className="absolute inset-x-0 top-4 flex items-center justify-between px-4">
-          <span className="rounded-full bg-slate-950/90 px-3 py-1 text-[11px] uppercase tracking-[0.28em] text-slate-300 border border-white/10">Event Pass</span>
-          <StatusPill status={booking.bookingStatus} />
-        </div>
-      </div>
-
-      <div className="space-y-4 p-5 sm:p-6">
-        <div className="min-w-0">
-          <h3 className="text-xl font-semibold text-white sm:text-2xl">{booking.event?.title || booking.eventName}</h3>
-          <p className="mt-2 line-clamp-2 text-sm text-slate-400">{booking.event?.location || booking.location || "Location not specified"}</p>
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl bg-slate-900/80 p-4">
-            <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Date</p>
-            <p className="mt-2 text-sm font-semibold text-white">{formatDate(booking.event?.date || booking.eventDate)}{booking.event?.time ? ` • ${booking.event.time}` : ""}</p>
-          </div>
-          <div className="rounded-2xl bg-slate-900/80 p-4">
-            <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Tickets</p>
-            <p className="mt-2 text-sm font-semibold text-white">{tickets} {tickets === 1 ? "seat" : "seats"}</p>
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.28em] text-slate-500">Total</p>
-            <p className="mt-2 text-2xl font-semibold text-orange-300">{formatCurrency(amount)}</p>
-            <p className="mt-1 text-xs text-slate-500">{booking.paymentStatus ? `Payment ${booking.paymentStatus}` : "Payment pending"}</p>
-          </div>
-
-          <button
-            onClick={() => onView(booking)}
-            className="inline-flex items-center justify-center gap-2 rounded-full bg-orange-500 px-5 py-3 text-sm font-semibold text-black transition hover:bg-orange-600"
-          >
-            <FiEye className="h-4 w-4" /> View pass
-          </button>
-        </div>
-      </div>
-    </article>
-  );
-};
-
-const Profile = () => {
-  const token = localStorage.getItem("token");
-  const [user, setUser] = useState(null);
-  const [bookings, setBookings] = useState([]);
-  const [sellTickets, setSellTickets] = useState([]);
-  const [edit, setEdit] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [selectedBooking, setSelectedBooking] = useState(null);
-  const [filterMode, setFilterMode] = useState("All");
-  const [searchQuery, setSearchQuery] = useState("");
-  const [sortMode, setSortMode] = useState("Latest");
-
-  const fetchAll = async () => {
-    setLoading(true);
+export default function Profile() {
+  const token = getToken(); const location = useLocation(); const navigate = useNavigate();
+  const section = location.pathname.split("/")[2] || "overview";
+  const [user, setUser] = useState(null); const [bookings, setBookings] = useState([]); const [sellTickets, setSellTickets] = useState([]);
+  const [loading, setLoading] = useState(true); const [error, setError] = useState(""); const [mobileNav, setMobileNav] = useState(false);
+  const [editOpen, setEditOpen] = useState(false); const [logoutOpen, setLogoutOpen] = useState(false); const [toast, setToast] = useState("");
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [query, setQuery] = useState(""); const [filter, setFilter] = useState("All"); const [sort, setSort] = useState("newest");
+  const loadData = async () => {
+    setLoading(true); setError("");
     try {
-      const [profileRes, bookingRes, sellRes] = await Promise.all([
-        fetch(`${API}/api/users/profile`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/api/bookings/my`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/api/sell-ticket/my`, { headers: { Authorization: `Bearer ${token}` } }),
-      ]);
-
-      if (!profileRes.ok) throw new Error("Failed to load profile");
-      const profileData = await profileRes.json();
-      setUser(profileData);
-      setName(profileData.name);
-      setEmail(profileData.email);
-
-      const bookingsData = await bookingRes.json();
-      setBookings(bookingsData || []);
-
-      const sellData = await sellRes.json();
-      setSellTickets(sellData || []);
-    } catch (err) {
-      setError(err.message || String(err));
-    } finally {
-      setLoading(false);
-    }
+      const headers = { Authorization: `Bearer ${token}` };
+      const [profileResponse, bookingResponse, sellingResponse] = await Promise.all([fetch(`${API}/api/users/profile`, { headers }), fetch(`${API}/api/bookings/my`, { headers }), fetch(`${API}/api/sell-ticket/my`, { headers })]);
+      if (!profileResponse.ok) throw new Error("Unable to load your account");
+      const profile = await profileResponse.json(); setUser(profile); setName(profile.name || ""); setEmail(profile.email || "");
+      setBookings(bookingResponse.ok ? await bookingResponse.json() : []); setSellTickets(sellingResponse.ok ? await sellingResponse.json() : []);
+    } catch (loadError) { setError(loadError.message || "Something went wrong."); } finally { setLoading(false); }
   };
-
-  useEffect(() => {
-    fetchAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  const updateProfile = async () => {
-    try {
-      const res = await fetch(`${API}/api/users/profile`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ name, email }),
-      });
-      if (!res.ok) throw new Error("Update failed");
-      const updated = await res.json();
-      setUser(updated);
-      setEdit(false);
-      alert("Profile updated ✅");
-    } catch (err) {
-      alert(err.message || String(err));
-    }
+  // The retry action reuses loadData; token is the intended fetch boundary.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { loadData(); }, [token]);
+  useEffect(() => { if (!toast) return undefined; const timer = setTimeout(() => setToast(""), 3500); return () => clearTimeout(timer); }, [toast]);
+  const upcoming = useMemo(() => bookings.filter((booking) => dateOf(booking) >= Date.now() && booking.bookingStatus !== "Cancelled").sort((a, b) => dateOf(a) - dateOf(b)), [bookings]);
+  const filtered = useMemo(() => bookings.filter((booking) => `${titleOf(booking)} ${booking.event?.location || booking.location || ""} ${booking._id || ""}`.toLowerCase().includes(query.toLowerCase()) && (filter === "All" || (booking.bookingStatus || "Pending") === filter)).sort((a, b) => sort === "oldest" ? dateOf(a) - dateOf(b) : dateOf(b) - dateOf(a)), [bookings, query, filter, sort]);
+  const stats = [["Total bookings", bookings.length, FiCreditCard], ["Upcoming events", upcoming.length, FiCalendar], ["Tickets purchased", bookings.reduce((sum, booking) => sum + quantityOf(booking), 0), FiTag], ["Events attended", bookings.filter((booking) => dateOf(booking) < Date.now() && booking.bookingStatus !== "Cancelled").length, FiCheckCircle]];
+  const navItems = [{ key: "overview", label: "Overview", icon: FiGrid }, { key: "profile", label: "My Profile", icon: FiUser }, { key: "bookings", label: "My Bookings", icon: FiCreditCard }, { key: "tickets", label: "My Tickets", icon: FiTag }, { key: "selling", label: "Sell Ticket Activity", icon: FiShoppingBag }, { key: "settings", label: "Account Settings", icon: FiSettings }];
+  const updateProfile = async (event) => {
+    event.preventDefault(); if (!name.trim() || !email.trim()) return setToast("Name and email are required.");
+    try { const response = await fetch(`${API}/api/users/profile`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ name: name.trim(), email: email.trim() }) }); const data = await response.json(); if (!response.ok) throw new Error(data.message || "Profile update failed"); setUser(data); setEditOpen(false); setToast("Profile updated successfully."); } catch (updateError) { setToast(updateError.message || "Something went wrong. Please try again."); }
   };
+  if (loading) return <main className="profile-shell"><div className="profile-loading"><div /><div /><div /></div></main>;
+  if (error) return <main className="profile-shell"><div className="account-error"><FiActivity size={28} /><h1>Something went wrong.</h1><p>{error}</p><button className="primary-button" onClick={loadData}>Try Again</button></div></main>;
+  const firstName = (user?.name || "there").split(" ")[0];
+  const content = section === "profile" ? <ProfileView user={user} onEdit={() => setEditOpen(true)} /> : section === "bookings" ? <BookingsView bookings={filtered} query={query} setQuery={setQuery} filter={filter} setFilter={setFilter} sort={sort} setSort={setSort} /> : section === "tickets" ? <TicketsView bookings={bookings} /> : section === "selling" ? <SellingView tickets={sellTickets} /> : section === "settings" ? <SettingsView user={user} onEdit={() => setEditOpen(true)} onLogout={() => setLogoutOpen(true)} /> : <Overview upcoming={upcoming} bookings={bookings} stats={stats} navigate={navigate} />;
+  return <main className="profile-shell"><div className="profile-layout"><aside className={`profile-sidebar ${mobileNav ? "is-open" : ""}`}><div className="sidebar-identity"><Avatar user={user} /><div><strong>{user?.name || "Eventify member"}</strong><span>{user?.email}</span></div><span className="role-badge">{user?.role || "member"}</span></div><button className="mobile-nav-toggle" onClick={() => setMobileNav(!mobileNav)}>Navigate account <FiChevronDown /></button><nav className="profile-nav" aria-label="Account navigation">{navItems.map(({ key, label, icon: Icon }) => <NavLink key={key} to={`/profile/${key}`} onClick={() => setMobileNav(false)} className={({ isActive }) => isActive ? "active" : ""}>{React.createElement(Icon)}{label}</NavLink>)}<span className="nav-divider" /><NavLink to="/contact"><FiShield />Help & Support</NavLink><button className="logout-link" onClick={() => setLogoutOpen(true)}><FiLogOut />Logout</button></nav><button className="sidebar-edit" onClick={() => setEditOpen(true)}><FiEdit3 />Edit Profile</button></aside><section className="profile-content"><div className="content-topline"><div><span className="eyebrow">ACCOUNT CENTER</span><h1>{section === "overview" ? `Good morning, ${firstName}` : navItems.find((item) => item.key === section)?.label || "Account"}</h1></div><button className="avatar-button" onClick={() => navigate("/profile/profile")}><Avatar user={user} /><span>{firstName}</span><FiChevronDown /></button></div>{content}</section></div>{editOpen && <Modal title="Edit your profile" onClose={() => setEditOpen(false)}><form className="edit-form" onSubmit={updateProfile}><label>Full name<input value={name} onChange={(event) => setName(event.target.value)} required /></label><label>Email address<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required /></label><div className="modal-actions"><button type="button" className="secondary-button" onClick={() => setEditOpen(false)}>Cancel</button><button className="primary-button">Save Changes</button></div></form></Modal>}{logoutOpen && <Modal title="Sign out of Eventify?" onClose={() => setLogoutOpen(false)}><p className="modal-copy">You can sign back in anytime to access your bookings and tickets.</p><div className="modal-actions"><button className="secondary-button" onClick={() => setLogoutOpen(false)}>Cancel</button><button className="danger-button" onClick={() => { clearToken(); navigate("/login"); }}>Logout</button></div></Modal>}{toast && <div className="toast" role="status">{toast}</div>}</main>;
+}
 
-  const stats = useMemo(() => {
-    const total = bookings.length;
-    const confirmed = bookings.filter(b => b.bookingStatus === "Confirmed").length;
-    const pending = bookings.filter(b => b.bookingStatus === "Pending").length;
-    return [
-      { title: "Bookings", value: String(total).padStart(2, "0") },
-      { title: "Confirmed", value: String(confirmed).padStart(2, "0") },
-      { title: "Pending", value: String(pending).padStart(2, "0") },
-    ];
-  }, [bookings]);
-
-  const eventCounts = useMemo(() => {
-    const now = new Date();
-    const upcoming = bookings.filter((b) => {
-      const d = new Date(b.event?.date || b.eventDate);
-      return !Number.isNaN(d.valueOf()) && d >= now;
-    }).length;
-    const past = bookings.filter((b) => {
-      const d = new Date(b.event?.date || b.eventDate);
-      return !Number.isNaN(d.valueOf()) && d < now;
-    }).length;
-    return {
-      all: bookings.length,
-      upcoming,
-      past,
-    };
-  }, [bookings]);
-
-  const filteredBookings = useMemo(() => {
-    const now = new Date();
-    const list = bookings.filter((b) => {
-      if (filterMode === "Upcoming") {
-        const d = new Date(b.event?.date || b.eventDate);
-        return !Number.isNaN(d.valueOf()) && d >= now;
-      }
-      if (filterMode === "Past") {
-        const d = new Date(b.event?.date || b.eventDate);
-        return !Number.isNaN(d.valueOf()) && d < now;
-      }
-      return true;
-    }).filter((b) => {
-      if (!searchQuery.trim()) return true;
-      const query = searchQuery.trim().toLowerCase();
-      const title = (b.event?.title || b.eventName || "").toLowerCase();
-      const location = (b.event?.location || b.location || "").toLowerCase();
-      return title.includes(query) || location.includes(query);
-    });
-
-    return [...list].sort((a, b) => {
-      const dateA = new Date(a.event?.date || a.eventDate).valueOf() || 0;
-      const dateB = new Date(b.event?.date || b.eventDate).valueOf() || 0;
-      const totalA = Number(a.totalAmount ?? a.totalPrice ?? (a.ticketCount ?? a.tickets ?? 1) * (a.event?.price ?? 0));
-      const totalB = Number(b.totalAmount ?? b.totalPrice ?? (b.ticketCount ?? b.tickets ?? 1) * (b.event?.price ?? 0));
-      if (sortMode === "Earliest") return dateA - dateB;
-      if (sortMode === "Amount") return totalB - totalA;
-      if (sortMode === "Title") return String(a.event?.title || a.eventName || "").localeCompare(String(b.event?.title || b.eventName || ""));
-      return dateB - dateA;
-    });
-  }, [bookings, filterMode, searchQuery, sortMode]);
-
-  if (loading) return <div className="page pt-20 text-center text-slate-400">Loading profile…</div>;
-  if (error) return <div className="page pt-20 text-center text-red-500">{error}</div>;
-
-  return (
-    <div className="page pt-20 px-6 max-w-6xl mx-auto">
-      <ProfileHero user={user} stats={stats} onEdit={() => setEdit(true)} />
-
-      {/* MY EVENTS header + filters */}
-      <div className="mt-6 space-y-5">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <h3 className="text-2xl font-semibold text-white">MY EVENTS</h3>
-            <p className="text-slate-400 mt-1">Your event wallet, now with instant search and premium pass previews.</p>
-          </div>
-
-          <div className="grid w-full gap-3 sm:grid-cols-[1fr_auto] lg:w-auto">
-            <label className="relative block w-full">
-              <FiSearch className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-orange-400" />
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search events or venues"
-                className="w-full rounded-2xl border border-white/10 bg-slate-900/80 py-3 pl-10 pr-4 text-sm text-white placeholder:text-slate-500 outline-none transition focus:border-orange-500"
-              />
-            </label>
-            <select
-              value={sortMode}
-              onChange={(e) => setSortMode(e.target.value)}
-              className="w-full rounded-2xl border border-white/10 bg-slate-900/80 py-3 px-4 text-sm text-white outline-none transition focus:border-orange-500"
-            >
-              <option value="Latest">Latest</option>
-              <option value="Earliest">Earliest</option>
-              <option value="Amount">Highest value</option>
-              <option value="Title">A → Z</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {['All', 'Upcoming', 'Past'].map((mode) => {
-            const count = mode === 'All' ? eventCounts.all : mode === 'Upcoming' ? eventCounts.upcoming : eventCounts.past;
-            return (
-              <button
-                key={mode}
-                onClick={() => setFilterMode(mode)}
-                className={`rounded-full px-4 py-2 text-xs font-semibold transition ${filterMode === mode ? 'bg-orange-500 text-black' : 'bg-slate-900/60 text-slate-300'}`}
-              >
-                {mode} <span className="ml-2 inline-flex rounded-full bg-white/5 px-2 py-1 text-[10px] font-medium text-slate-300">{count}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Grid of Event Passes */}
-      <div className="mt-5 grid grid-cols-1 gap-6 xl:grid-cols-2">
-        {filteredBookings.length === 0 ? (
-          <div className="col-span-full rounded-2xl bg-slate-900/70 p-8 text-center text-slate-400">No events match your search or selected filter.</div>
-        ) : (
-          filteredBookings.map((b) => (
-            <EventPassCard
-              key={b._id}
-              booking={b}
-              onView={(booking) => {
-                setSelectedBooking(booking);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-            />
-          ))
-        )}
-      </div>
-
-      {/* Modal: View Pass / Ticket */}
-      {selectedBooking && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4 py-8">
-          <div className="w-full max-w-3xl rounded-2xl border border-white/8 bg-slate-950/95 shadow-2xl p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-orange-400">Booking</p>
-                <h2 className="mt-1 text-xl font-semibold text-white">{selectedBooking.event?.title || selectedBooking.eventName}</h2>
-                <p className="mt-1 text-xs text-slate-400">Ref: {String(selectedBooking._id).slice(0,10)}</p>
-              </div>
-              <button onClick={() => setSelectedBooking(null)} className="text-slate-300 p-2 rounded hover:bg-slate-900">×</button>
-            </div>
-
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-xl bg-slate-900/80 p-4">
-                <p className="text-xs text-slate-400">When</p>
-                <p className="text-sm font-semibold text-white mt-1">{selectedBooking.event?.date || selectedBooking.eventDate} {selectedBooking.event?.time ? `• ${selectedBooking.event.time}` : ''}</p>
-                <p className="text-xs text-slate-400 mt-2">{selectedBooking.event?.location || selectedBooking.location}</p>
-              </div>
-
-              <div className="rounded-xl bg-slate-900/80 p-4">
-                <p className="text-xs text-slate-400">Status</p>
-                <div className="mt-2 flex items-center gap-3">
-                  <StatusPill status={selectedBooking.bookingStatus} />
-                  <PaymentPill payment={selectedBooking.paymentStatus} />
-                </div>
-
-                <div className="mt-4">
-                  <p className="text-xs text-slate-400">Total</p>
-                  <p className="text-lg font-semibold text-orange-300">
-                    {(() => {
-                      const tickets = selectedBooking.ticketCount ?? selectedBooking.tickets ?? 1;
-                      const a = (selectedBooking.totalAmount ?? selectedBooking.totalPrice) || tickets * (selectedBooking.event?.price ?? 0) || 0;
-                      return `₹ ${Number(a).toLocaleString()}`;
-                    })()}
-                  </p>
-                </div>
-              </div>
-
-              <div className="sm:col-span-2 rounded-xl bg-slate-900/80 p-4 text-center">
-                {selectedBooking.bookingStatus === 'Confirmed' ? (
-                  <>
-                    <p className="text-sm font-semibold text-emerald-300">✓ Booking confirmed</p>
-                    <p className="text-xs text-slate-400 mt-2">Present this QR at the venue.</p>
-                    <div className="mt-3 inline-block bg-white p-2 rounded">
-                      <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(String(selectedBooking._id))}`} alt="QR code" className="h-44 w-44" />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm font-semibold text-amber-300">● Confirmation in progress</p>
-                    <p className="text-xs text-slate-400 mt-2">Your digital ticket will appear here after confirmation.</p>
-                  </>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SELL TICKETS section preserved */}
-      <div className="bg-slate-900/80 rounded-2xl p-6 mt-8 border border-white/6 shadow-sm">
-        <h3 className="text-xl font-semibold mb-2">My <span className="text-orange-500">Sell Tickets</span></h3>
-        {sellTickets.length === 0 ? (
-          <p className="text-slate-400">No sell tickets yet.</p>
-        ) : (
-          sellTickets.map(t => (
-            <div key={t._id} className="bg-black p-4 rounded mb-3 flex justify-between">
-              <div>
-                <p className="font-semibold">{t.eventName}</p>
-                <p className="text-sm text-slate-400">₹{t.expectedPrice} • {t.eventDate}</p>
-              </div>
-              <span className={`px-3 py-1 rounded ${t.status === 'Approved' ? 'bg-green-700' : t.status === 'Rejected' ? 'bg-red-700' : 'bg-yellow-700'}`}>{t.status}</span>
-            </div>
-          ))
-        )}
-      </div>
-
-      {/* Edit profile drawer (simple inline) */}
-      {edit && (
-        <div className="fixed inset-0 z-40 flex items-end md:items-center justify-center bg-black/40 px-4 py-6">
-          <div className="w-full max-w-md rounded-2xl bg-slate-950 p-6 border border-white/8">
-            <h4 className="text-lg font-semibold text-white">Edit profile</h4>
-            <p className="text-sm text-slate-400 mt-1">Update your name and email.</p>
-            <div className="mt-4 space-y-3">
-              <input value={name} onChange={e => setName(e.target.value)} className="w-full rounded-xl bg-slate-900/70 px-4 py-3 text-white outline-none" />
-              <input value={email} onChange={e => setEmail(e.target.value)} className="w-full rounded-xl bg-slate-900/70 px-4 py-3 text-white outline-none" />
-            </div>
-            <div className="mt-4 flex justify-end gap-3">
-              <button onClick={() => setEdit(false)} className="rounded-full px-4 py-2 text-sm bg-slate-800 text-slate-300">Cancel</button>
-              <button onClick={updateProfile} className="rounded-full px-4 py-2 text-sm bg-orange-500 text-black">Save changes</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
-export default Profile;
+function Overview({ upcoming, bookings, stats, navigate }) {
+  return <div className="dashboard-view"><p className="subheading">Here&apos;s what&apos;s happening with your Eventify account.</p><div className="stats-grid">{stats.map(([label, value, Icon]) => <div className="stat-card" key={label}><div className="stat-icon">{React.createElement(Icon)}</div><span>{label}</span><strong>{value}</strong></div>)}</div><div className="overview-grid"><Panel title="Recent activity"><div className="activity-list">{bookings.length ? bookings.slice(0, 5).map((booking) => <div className="activity-row" key={booking._id}><span className="activity-dot"><FiCheckCircle /></span><div><strong>Booking {booking.bookingStatus || "created"}</strong><span>{titleOf(booking)}</span></div><time>{dateText(booking.createdAt || booking.eventDate)}</time><Status value={booking.bookingStatus} /></div>) : <EmptyState title="No recent activity yet." />}</div></Panel><Panel title="Upcoming bookings" icon={FiCalendar}><button className="text-button" onClick={() => navigate("/profile/bookings")}>View all <FiArrowRight /></button>{upcoming.slice(0, 3).map((booking) => <BookingRow booking={booking} key={booking._id} />)}{!upcoming.length && <EmptyState title="You haven&apos;t booked any upcoming events yet." icon={FiCalendar}><NavLink className="text-button" to="/events">Explore Events <FiArrowRight /></NavLink></EmptyState>}</Panel></div></div>;
+}
+function BookingsView({ bookings, query, setQuery, filter, setFilter, sort, setSort }) {
+  return <div className="dashboard-view"><div className="toolbar"><label className="search-field"><FiSearch /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search bookings, venues or IDs" aria-label="Search bookings" /></label><select value={filter} onChange={(event) => setFilter(event.target.value)}><option>All</option><option>Confirmed</option><option>Pending</option><option>Cancelled</option></select><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select></div><Panel title="Booking history" icon={FiCreditCard}>{bookings.length ? bookings.map((booking) => <BookingRow booking={booking} key={booking._id} />) : <EmptyState title="No bookings yet." icon={FiCreditCard}><NavLink className="text-button" to="/events">Explore Events <FiArrowRight /></NavLink></EmptyState>}</Panel></div>;
+}
+function TicketsView({ bookings }) {
+  const confirmed = bookings.filter((booking) => booking.bookingStatus === "Confirmed");
+  return <div className="dashboard-view"><p className="subheading">Your confirmed passes, ready when you are.</p><div className="ticket-grid">{confirmed.map((booking) => <article className="digital-ticket" key={booking._id}><div className="ticket-image">{imageUrl(booking.event?.image) ? <img src={imageUrl(booking.event.image)} alt="" /> : <FiTag />}</div><div className="ticket-details"><span className="eyebrow">EVENTIFY PASS</span><h2>{titleOf(booking)}</h2><p><FiCalendar />{dateText(booking.event?.date || booking.eventDate)} · {booking.event?.time || "Time pending"}</p><p><FiMapPin />{booking.event?.location || booking.location || "Venue pending"}</p><div className="ticket-meta"><span>Ticket type<strong>General admission</strong></span><span>Quantity<strong>{quantityOf(booking)}</strong></span><span>Booking ID<strong>#{String(booking._id).slice(-8)}</strong></span></div></div><div className="ticket-status"><Status value={booking.bookingStatus} /><span>₹ {totalOf(booking).toLocaleString()}</span></div></article>)}{!confirmed.length && <EmptyState title="No confirmed tickets yet." icon={FiTag}><NavLink className="text-button" to="/events">Find an event <FiArrowRight /></NavLink></EmptyState>}</div></div>;
+}
+function ProfileView({ user, onEdit }) {
+  return <div className="dashboard-view"><section className="profile-intro"><Avatar user={user} large /><div><span className="eyebrow">PERSONAL PROFILE</span><h2>{user?.name}</h2><p>{user?.email}</p><Status value={user?.status === "active" ? "Active" : user?.status} /></div><button className="primary-button" onClick={onEdit}><FiEdit3 />Edit Profile</button></section><div className="info-grid"><Panel title="Personal information" icon={FiUser}><Info label="Full name" value={user?.name} /><Info label="Email address" value={user?.email} /><Info label="Phone" value={user?.phone || "Not added"} /></Panel><Panel title="Account information" icon={FiShield}><Info label="Role" value={user?.role || "member"} /><Info label="Account status" value={user?.status || "active"} /><Info label="Joined" value={dateText(user?.createdAt)} /></Panel></div></div>;
+}
+function SellingView({ tickets }) {
+  return <div className="dashboard-view"><p className="subheading">Track the ticket resale requests you have submitted.</p><Panel title="Selling activity" icon={FiShoppingBag}>{tickets.length ? tickets.map((ticket) => <div className="activity-row" key={ticket._id}><span className="activity-dot"><FiShoppingBag /></span><div><strong>{ticket.eventName}</strong><span>{dateText(ticket.eventDate)} · Expected ₹{Number(ticket.expectedPrice || 0).toLocaleString()}</span></div><time>{dateText(ticket.createdAt)}</time><Status value={ticket.status} /></div>) : <EmptyState title="No ticket sale requests yet." icon={FiShoppingBag}><NavLink className="text-button" to="/sell-ticket">Sell Your Tickets <FiArrowRight /></NavLink></EmptyState>}</Panel></div>;
+}
+function SettingsView({ user, onEdit, onLogout }) {
+  return <div className="dashboard-view"><Panel title="Account settings" icon={FiSettings}><Info label="Name" value={user?.name} /><Info label="Email" value={user?.email} /><div className="setting-action"><span><strong>Profile details</strong><small>Keep your contact information current.</small></span><button className="secondary-button" onClick={onEdit}>Edit profile</button></div></Panel><section className="dashboard-panel danger-zone"><div><span className="eyebrow">SESSION</span><h2>Sign out</h2><p>End your current Eventify session on this device.</p></div><button className="danger-button" onClick={onLogout}><FiLogOut />Logout</button></section></div>;
+}

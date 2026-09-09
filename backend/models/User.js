@@ -7,6 +7,8 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     phone: { type: String },
     role: { type: String, default: "user" },
+    googleId: { type: String, unique: true, sparse: true },
+    avatar: { type: String },
     status: {
       type: String,
       enum: ["active", "pending", "suspended", "blocked"],
