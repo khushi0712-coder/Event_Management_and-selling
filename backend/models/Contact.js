@@ -1,26 +1,16 @@
-import mongoose from "mongoose";
+﻿import mongoose from "mongoose";
 
 const contactSchema = new mongoose.Schema(
   {
-    name: {
-      type: String,
-      required: true,
+    name: { type: String, required: true, trim: true },
+    email: { type: String, trim: true },
+    phone: { type: String, trim: true },
+    message: { type: String, required: true, trim: true },
+    user: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
     },
-    email: {
-      type: String,
-      required: true,
-    },
-    message: {
-      type: String,
-      required: true,
-      trim: true,
-      maxlength: 5000,
-    },
-    senderType: {
-      type: String,
-      enum: ["customer", "admin"],
-      default: "customer",
-    },
+    read: { type: Boolean, default: false },
     status: {
       type: String,
       enum: ["Unread", "Read", "Awaiting Reply", "Replied", "Resolved", "Archived"],
@@ -31,26 +21,14 @@ const contactSchema = new mongoose.Schema(
       enum: ["Normal", "Important", "Urgent"],
       default: "Normal",
     },
-    readAt: Date,
-    resolvedAt: Date,
-    lastActivityAt: {
-      type: Date,
-      default: Date.now,
-    },
+    lastActivityAt: { type: Date, default: Date.now },
     replies: [
       {
-        message: { type: String, required: true, trim: true, maxlength: 5000 },
-        adminId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+        message: { type: String, required: true },
+        senderType: { type: String, enum: ["customer", "admin"], required: true },
         createdAt: { type: Date, default: Date.now },
-        edited: { type: Boolean, default: false },
-        editedAt: Date,
-        deleted: { type: Boolean, default: false },
       },
     ],
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-    },
   },
   { timestamps: true },
 );

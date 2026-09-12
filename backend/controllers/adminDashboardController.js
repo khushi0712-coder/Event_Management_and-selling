@@ -2,11 +2,10 @@ import User from "../models/User.js";
 import Event from "../models/Event.js";
 import Booking from "../models/Booking.js";
 import SellTicket from "../models/SellTicket.js";
-import Contact from "../models/Contact.js";
 
 export const getAdminDashboard = async (req, res) => {
   try {
-    const [userStats, eventStats, bookingStats, revenueStats, pendingSellTickets, recentBookings, recentSellTickets, recentContacts] = await Promise.all([
+    const [userStats, eventStats, bookingStats, revenueStats, pendingSellTickets, recentBookings, recentSellTickets] = await Promise.all([
       User.aggregate([{ $group: { _id: null, totalUsers: { $sum: 1 } } }]),
       Event.aggregate([{ $group: { _id: null, totalEvents: { $sum: 1 } } }]),
       Booking.aggregate([{ $group: { _id: null, totalBookings: { $sum: 1 } } }]),
@@ -14,7 +13,6 @@ export const getAdminDashboard = async (req, res) => {
       SellTicket.countDocuments({ status: "Pending" }),
       Booking.find().sort({ createdAt: -1 }).limit(5).populate("user", "name email"),
       SellTicket.find().sort({ createdAt: -1 }).limit(5).populate("user", "name email"),
-      Contact.find().sort({ createdAt: -1 }).limit(5),
     ]);
 
     const totalUsers = userStats[0]?.totalUsers || 0;
@@ -30,7 +28,7 @@ export const getAdminDashboard = async (req, res) => {
       pendingSellTickets,
       recentBookings,
       recentSellTickets,
-      recentContacts,
+      recentContacts: [],
     });
   } catch (error) {
     console.error("Dashboard fetch error:", error);

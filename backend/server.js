@@ -12,8 +12,9 @@ import userRoutes from "./routes/userRoutes.js";
 import adminRoutes from "./routes/adminRoutes.js";
 import adminEventRoutes from "./routes/adminEventRoutes.js";
 import publicEventRoutes from "./routes/publicEventRoutes.js";
-
 import contactRoutes from "./routes/contactRoutes.js";
+
+import emailRoutes from "./routes/emailRoutes.js";
 import adminBookingRoutes from "./routes/adminBookingRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -45,9 +46,9 @@ app.use("/api/admin", adminRoutes);
 app.use("/api/admin/events", adminEventRoutes);
 app.use("/api/admin/bookings", adminBookingRoutes);
 app.use("/api/events", publicEventRoutes);
-app.use("/uploads", express.static("uploads"));
-
 app.use("/api/contact", contactRoutes);
+app.use("/api/email", emailRoutes);
+app.use("/uploads", express.static("uploads"));
 
 /* ====== SERVER ====== */
 const PORT = process.env.PORT || 5000;
