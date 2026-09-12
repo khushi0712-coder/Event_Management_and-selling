@@ -121,7 +121,6 @@ const Contacts = () => {
               <span className="rounded-xl border border-orange-400/25 bg-orange-500/[0.10] p-2 text-orange-300"><FiMail /></span>
               <div>
                 <p className="text-base font-semibold text-white">Compose Email</p>
-                <p className="text-xs text-slate-500">Reach the right registered user with a campaign or update.</p>
               </div>
             </div>
 
@@ -160,7 +159,6 @@ const Contacts = () => {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-base font-semibold text-white">Delivery History</p>
-                <p className="text-xs text-slate-500">Sent email records</p>
               </div>
               <div className="relative">
                 <FiSearch className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-600" />
@@ -188,7 +186,6 @@ const Contacts = () => {
                         <p className="mt-2 line-clamp-3 text-sm text-slate-400">{log.body || log.message || log.messagePreview || "No message preview"}</p>
                         <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
                           <span>{new Date(log.createdAt || log.sentAt || Date.now()).toLocaleString()}</span>
-                          <span className="rounded-full border border-white/10 px-2 py-1 text-[10px] uppercase tracking-[0.16em] text-slate-300">{log.status || "queued"}</span>
                         </div>
                       </div>
                       <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${log.status === "failed" ? "bg-red-500/20 text-red-200" : "bg-emerald-500/20 text-emerald-200"}`}>{log.status || "queued"}</span>

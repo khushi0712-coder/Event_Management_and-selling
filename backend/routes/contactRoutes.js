@@ -8,7 +8,7 @@ import protect from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 // User sends message
-router.post("/", createContact);
+router.post("/", protect, createContact);
 
 // Admin views messages
 router.get("/admin", protect, getAllContacts);

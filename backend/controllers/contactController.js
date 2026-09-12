@@ -1,20 +1,88 @@
-﻿import Contact from "../models/Contact.js";
+﻿import nodemailer from "nodemailer";
+import Contact from "../models/Contact.js";
+import User from "../models/User.js";
+
+const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
+
+const getTransporter = () => {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_FROM || user;
+
+  if (!host || !user || !pass) {
+    return null;
+  }
+
+  return {
+    transporter: nodemailer.createTransport({
+      host,
+      port,
+      secure: Number(port) === 465,
+      auth: { user, pass },
+    }),
+    from,
+    to: user,
+  };
+};
 
 // USER: SEND MESSAGE
 export const createContact = async (req, res) => {
   try {
-    const { name, email, message } = req.body;
+    const { name, email, subject, message } = req.body;
+    const normalizedSubject = String(subject || "").trim();
+    const normalizedMessage = String(message || "").trim();
+
+    if (!normalizedSubject || !normalizedMessage) {
+      return res.status(400).json({ message: "Subject and message are required." });
+    }
+
+    const loggedUser = await User.findById(req.user?.id || req.user?._id).select("-password");
+    const resolvedName = String(name || loggedUser?.name || "Eventify User").trim();
+    const resolvedEmail = normalizeEmail(loggedUser?.email || email);
+
+    if (!resolvedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolvedEmail)) {
+      return res.status(400).json({ message: "A valid registered email is required." });
+    }
+
+    const smtpConfig = getTransporter();
+    if (!smtpConfig) {
+      return res.status(500).json({ message: "SMTP configuration is missing. Add SMTP settings to enable delivery." });
+    }
+
+    const mailOptions = {
+      from: smtpConfig.from,
+      to: smtpConfig.to,
+      replyTo: resolvedEmail,
+      subject: normalizedSubject,
+      text: normalizedMessage,
+      html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${normalizedMessage.replace(/\n/g, "<br />")}</div>`,
+    };
+
+    await smtpConfig.transporter.sendMail(mailOptions);
 
     const contact = await Contact.create({
-      name,
-      email,
-      message,
+      name: resolvedName,
+      email: resolvedEmail,
+      subject: normalizedSubject,
+      message: normalizedMessage,
+      user: loggedUser?._id || undefined,
+      status: "Unread",
     });
 
-    res.status(201).json(contact);
+    return res.status(201).json({
+      message: "Message sent successfully",
+      contact,
+      email: {
+        to: smtpConfig.to,
+        replyTo: resolvedEmail,
+        status: "sent",
+      },
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Failed to send message" });
+    return res.status(500).json({ message: err?.message || "Failed to send message" });
   }
 };
 

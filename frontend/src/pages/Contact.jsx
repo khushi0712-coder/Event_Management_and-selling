@@ -1,31 +1,41 @@
 import { useState } from "react";
+import { getToken } from "../services/auth";
 
 const Contact = () => {
   const [form, setForm] = useState({
     name: "",
     email: "",
+    subject: "",
     message: "",
   });
 
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    const token = getToken();
+    if (!token) {
+      alert("Please login before sending a message.");
+      return;
+    }
+
     const res = await fetch(
-  `${import.meta.env.VITE_API_URL}/api/contact`,
-  {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(form),
-  }
-);
+      `${import.meta.env.VITE_API_URL}/api/contact`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(form),
+      }
+    );
 
     if (res.ok) {
       alert("Message sent successfully ✅");
-      setForm({ name: "", email: "", message: "" });
+      setForm({ name: "", email: "", subject: "", message: "" });
     } else {
-      alert("Failed to send message ❌");
+      const data = await res.json().catch(() => ({}));
+      alert(data?.message || "Failed to send message ❌");
     }
   };
 
@@ -47,6 +57,14 @@ const Contact = () => {
           placeholder="Email"
           value={form.email}
           onChange={(e) => setForm({ ...form, email: e.target.value })}
+          required
+        />
+
+        <input
+          className="w-full p-3 bg-zinc-900 rounded"
+          placeholder="Subject"
+          value={form.subject}
+          onChange={(e) => setForm({ ...form, subject: e.target.value })}
           required
         />
 
