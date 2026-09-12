@@ -1,19 +1,54 @@
 import { NavLink } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { getToken, getTokenPayload } from "../services/auth";
+
+const API = import.meta.env.VITE_API_URL || "";
 
 const MobileMenu = ({ open, onClose }) => {
-  const token = localStorage.getItem("token");
+  const [profile, setProfile] = useState(null);
+  const token = getToken();
+  const payload = getTokenPayload(token);
+  const role = payload?.role || null;
 
-  let role = null;
-  if (token) {
-    try {
-      role = JSON.parse(atob(token.split(".")[1])).role;
-    } catch {
-      role = null;
+  useEffect(() => {
+    if (!token) {
+      setProfile(null);
+      return undefined;
     }
-  }
+
+    let mounted = true;
+    fetch(`${API}/api/users/profile`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("Unable to load profile");
+        return response.json();
+      })
+      .then((data) => {
+        if (!mounted) return;
+        setProfile(data);
+      })
+      .catch(() => {
+        if (!mounted) return;
+        setProfile({
+          name: payload?.name || "",
+          email: payload?.email || "",
+          role: payload?.role || "member",
+        });
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [token, payload?.role, payload?.email]);
 
   const isLoggedIn = !!token;
   const isAdmin = role === "admin";
+  const profileName = profile?.name || profile?.email || payload?.email || "Profile";
+  const profileRole = profile?.role || payload?.role || "member";
+  const profileInitials = String(profileName).trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join("") || "P";
 
   return (
     <div
@@ -69,6 +104,14 @@ const MobileMenu = ({ open, onClose }) => {
           </>
         ) : (
           <>
+            <div className="profile-dropdown-header">
+              <span className="profile-dropdown-avatar">{profileInitials}</span>
+              <div>
+                <span className="profile-dropdown-name">{profileName}</span>
+                <span className="profile-dropdown-role">{profileRole}</span>
+              </div>
+            </div>
+
             <NavLink
               to="/profile"
               onClick={onClose}
