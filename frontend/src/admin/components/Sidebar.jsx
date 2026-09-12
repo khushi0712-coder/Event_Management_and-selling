@@ -40,10 +40,7 @@ const Sidebar = ({ open, onClose }) => {
         })}
       </nav>
 
-      <div className="mt-8 rounded-3xl border border-orange-500/20 bg-gradient-to-br from-orange-500/10 to-slate-900 p-4">
-        <p className="text-sm font-semibold text-white">Need a quick boost?</p>
-        <p className="mt-2 text-sm text-slate-400">Launch a new campaign and grow your event reach with smarter insights.</p>
-      </div>
+      
     </aside>
   );
 };

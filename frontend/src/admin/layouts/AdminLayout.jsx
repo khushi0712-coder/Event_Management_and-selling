@@ -13,13 +13,7 @@ const AdminLayout = () => {
       <div className="lg:pl-72">
         <Topbar onMenuClick={() => setSidebarOpen(true)} />
 
-        <main className="px-4 py-6 lg:px-6">
-          <div className="flex items-center gap-2 text-sm text-slate-400">
-            <span className="font-medium text-white">Admin</span>
-            <span>/</span>
-            <span>Overview</span>
-          </div>
-
+        <main className="min-h-screen px-4 py-6 lg:px-6">
           <div className="mt-6">
             <Outlet />
           </div>
