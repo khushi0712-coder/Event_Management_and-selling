@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { FiBarChart2, FiBookOpen, FiCalendar, FiCheckCircle, FiHome, FiMessageSquare, FiSettings, FiSliders, FiUsers } from "react-icons/fi";
+import { FiBookOpen, FiCalendar, FiCheckCircle, FiHome, FiMessageSquare, FiSliders, FiUsers } from "react-icons/fi";
 
 const links = [
   { name: "Dashboard", path: "/admin", icon: FiHome },
@@ -8,8 +8,6 @@ const links = [
   { name: "Sell Tickets", path: "/admin/sell-tickets", icon: FiCheckCircle },
   { name: "Users", path: "/admin/users", icon: FiUsers },
   { name: "Contacts", path: "/admin/contacts", icon: FiMessageSquare },
-  { name: "Analytics", path: "/admin/analytics", icon: FiBarChart2 },
-  { name: "Settings", path: "/admin/settings", icon: FiSettings },
 ];
 
 const Sidebar = ({ open, onClose }) => {
@@ -17,7 +15,7 @@ const Sidebar = ({ open, onClose }) => {
     <aside className={`fixed inset-y-0 left-0 z-40 w-72 border-r border-white/10 bg-slate-950/95 px-5 py-6 backdrop-blur-xl transition-transform duration-300 lg:translate-x-0 ${open ? "translate-x-0" : "-translate-x-full"}`}>
       <div className="flex items-center justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.4em] text-orange-400">Eventora</p>
+          <p className="text-sm font-semibold uppercase tracking-[0.4em] text-orange-400">EVENTIFY</p>
           <h2 className="mt-1 text-xl font-semibold text-white">Admin Panel</h2>
         </div>
         <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-slate-300 lg:hidden">

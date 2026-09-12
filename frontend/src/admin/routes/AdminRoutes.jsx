@@ -6,8 +6,6 @@ import Users from "../pages/Users";
 import Bookings from "../pages/Bookings";
 import SellTickets from "../pages/SellTickets";
 import Contacts from "../pages/Contacts";
-import Analytics from "../pages/Analytics";
-import Settings from "../pages/Settings";
 import { clearToken, isValidAdminSession } from "../../services/auth";
 
 const AdminRoutes = () => {
@@ -27,8 +25,6 @@ const AdminRoutes = () => {
         <Route path="bookings" element={<Bookings />} />
         <Route path="sell-tickets" element={<SellTickets />} />
         <Route path="contacts" element={<Contacts />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="settings" element={<Settings />} />
       </Route>
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
