@@ -1,6 +1,6 @@
-import nodemailer from "nodemailer";
 import EmailLog from "../models/EmailLog.js";
 import User from "../models/User.js";
+import { getTransporter, sendMailWithTimeout } from "../utils/smtp.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
@@ -25,28 +25,6 @@ const normalizeLog = (log) => {
     sentAt: raw.sentAt || raw.createdAt,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
-  };
-};
-
-const getTransporter = () => {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_FROM || process.env.ADMIN_EMAIL || user;
-
-  if (!host || !user || !pass) {
-    return null;
-  }
-
-  return {
-    transporter: nodemailer.createTransport({
-      host,
-      port,
-      secure: Number(port) === 465,
-      auth: { user, pass },
-    }),
-    from,
   };
 };
 
@@ -107,7 +85,18 @@ export const sendEmail = async (req, res) => {
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${trimmedBody.replace(/\n/g, "<br />")}</div>`,
     };
 
-    const info = await smtpConfig.transporter.sendMail(mailOptions);
+    let info;
+    try {
+      info = await sendMailWithTimeout(smtpConfig.transporter, mailOptions);
+    } catch (error) {
+      console.error("[emailController] SMTP sendMail failed", {
+        code: error?.code,
+        command: error?.command,
+        message: error?.message,
+        name: error?.name,
+      });
+      throw error;
+    }
 
     emailLog.status = "sent";
     emailLog.messageId = info?.messageId || null;

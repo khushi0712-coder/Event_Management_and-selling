@@ -25,11 +25,13 @@ export const getTransporter = () => {
     return null;
   }
 
+  const secure = port === 465;
+
   return {
     transporter: nodemailer.createTransport({
       host,
       port,
-      secure: port === 465,
+      secure,
       auth: {
         user,
         pass,
@@ -49,5 +51,17 @@ export const sendMailWithTimeout = async (
   mailOptions,
   timeoutMs = 30000
 ) => {
-  return transporter.sendMail(mailOptions);
+  try {
+    await transporter.verify();
+    return await transporter.sendMail(mailOptions);
+  } catch (error) {
+    console.error("[smtp] Gmail connection/send failed", {
+      code: error?.code,
+      command: error?.command,
+      message: error?.message,
+      name: error?.name,
+      timeoutMs,
+    });
+    throw error;
+  }
 };

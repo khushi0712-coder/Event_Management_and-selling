@@ -1,31 +1,8 @@
-﻿import nodemailer from "nodemailer";
-import Contact from "../models/Contact.js";
+﻿import Contact from "../models/Contact.js";
 import User from "../models/User.js";
+import { getTransporter, sendMailWithTimeout } from "../utils/smtp.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
-
-const getTransporter = () => {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_FROM || user;
-
-  if (!host || !user || !pass) {
-    return null;
-  }
-
-  return {
-    transporter: nodemailer.createTransport({
-      host,
-      port,
-      secure: Number(port) === 465,
-      auth: { user, pass },
-    }),
-    from,
-    to: user,
-  };
-};
 
 // USER: SEND MESSAGE
 export const createContact = async (req, res) => {
@@ -60,7 +37,17 @@ export const createContact = async (req, res) => {
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${normalizedMessage.replace(/\n/g, "<br />")}</div>`,
     };
 
-    await smtpConfig.transporter.sendMail(mailOptions);
+    try {
+      await sendMailWithTimeout(smtpConfig.transporter, mailOptions);
+    } catch (err) {
+      console.error("[contactController] SMTP sendMail failed", {
+        code: err?.code,
+        command: err?.command,
+        message: err?.message,
+        name: err?.name,
+      });
+      throw err;
+    }
 
     const contact = await Contact.create({
       name: resolvedName,
