@@ -3,7 +3,7 @@ import nodemailer from "nodemailer";
 const normalize = (value = "") => String(value || "").trim();
 
 export const getTransporter = () => {
-  const host = normalize(process.env.SMTP_HOST);
+  const host = normalize(process.env.SMTP_HOST || "smtp.gmail.com");
   const port = Number.parseInt(
     normalize(process.env.SMTP_PORT || "587"),
     10
@@ -31,8 +31,9 @@ export const getTransporter = () => {
     transporter: nodemailer.createTransport({
       host,
       port,
-      secure,
+      secure: false,
       requireTLS: true,
+      family: 4,
       auth: {
         user,
         pass,
@@ -40,7 +41,6 @@ export const getTransporter = () => {
       connectionTimeout: 30000,
       greetingTimeout: 30000,
       socketTimeout: 30000,
-      family: 4,
     }),
     from,
     to: user,
