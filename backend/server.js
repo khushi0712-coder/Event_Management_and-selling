@@ -39,7 +39,7 @@ app.use(cors());
 app.use(express.json()); // ✅ ONLY ONCE
 
 /* ====== STATIC FILES ====== */
-app.use("/uploads", express.static("uploads"));
+app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 
 /* ====== ROUTES ====== */
 app.use("/api/auth", authRoutes);
@@ -52,7 +52,6 @@ app.use("/api/admin/bookings", adminBookingRoutes);
 app.use("/api/events", publicEventRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/email", emailRoutes);
-app.use("/uploads", express.static("uploads"));
 
 /* ====== SERVER ====== */
 const PORT = process.env.PORT || 5000;
