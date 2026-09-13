@@ -1,31 +1,8 @@
-﻿import nodemailer from "nodemailer";
-import Contact from "../models/Contact.js";
+﻿import Contact from "../models/Contact.js";
 import User from "../models/User.js";
+import { getTransporter, sendMailWithTimeout } from "../utils/smtp.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
-
-const getTransporter = () => {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
-  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_FROM || user;
-
-  if (!host || !user || !pass) {
-    return null;
-  }
-
-  return {
-    transporter: nodemailer.createTransport({
-      host,
-      port,
-      secure: Number(port) === 465,
-      auth: { user, pass },
-    }),
-    from,
-    to: user,
-  };
-};
 
 // USER: SEND MESSAGE
 export const createContact = async (req, res) => {
@@ -51,17 +28,6 @@ export const createContact = async (req, res) => {
       return res.status(500).json({ message: "SMTP configuration is missing. Add SMTP settings to enable delivery." });
     }
 
-    const mailOptions = {
-      from: smtpConfig.from,
-      to: smtpConfig.to,
-      replyTo: resolvedEmail,
-      subject: normalizedSubject,
-      text: normalizedMessage,
-      html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${normalizedMessage.replace(/\n/g, "<br />")}</div>`,
-    };
-
-    await smtpConfig.transporter.sendMail(mailOptions);
-
     const contact = await Contact.create({
       name: resolvedName,
       email: resolvedEmail,
@@ -71,15 +37,33 @@ export const createContact = async (req, res) => {
       status: "Unread",
     });
 
-    return res.status(201).json({
-      message: "Message sent successfully",
-      contact,
-      email: {
-        to: smtpConfig.to,
-        replyTo: resolvedEmail,
-        status: "sent",
-      },
-    });
+    const mailOptions = {
+      from: smtpConfig.from,
+      to: smtpConfig.to,
+      replyTo: resolvedEmail,
+      subject: normalizedSubject,
+      text: normalizedMessage,
+      html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${normalizedMessage.replace(/\n/g, "<br />")}</div>`,
+    };
+
+    try {
+      await sendMailWithTimeout(smtpConfig.transporter, mailOptions, 15000);
+
+      return res.status(201).json({
+        message: "Message sent successfully",
+        contact,
+        email: {
+          to: smtpConfig.to,
+          replyTo: resolvedEmail,
+          status: "sent",
+        },
+      });
+    } catch (err) {
+      console.error("Contact message email failed:", err);
+      contact.status = "Unread";
+      await contact.save();
+      return res.status(500).json({ message: err?.message || "Failed to send message" });
+    }
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: err?.message || "Failed to send message" });
