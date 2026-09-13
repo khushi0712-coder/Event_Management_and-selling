@@ -1,6 +1,6 @@
+import nodemailer from "nodemailer";
 import EmailLog from "../models/EmailLog.js";
 import User from "../models/User.js";
-import { getTransporter } from "../utils/smtp.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
@@ -25,6 +25,28 @@ const normalizeLog = (log) => {
     sentAt: raw.sentAt || raw.createdAt,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
+  };
+};
+
+const getTransporter = () => {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM_EMAIL || process.env.SMTP_FROM || process.env.ADMIN_EMAIL || user;
+
+  if (!host || !user || !pass) {
+    return null;
+  }
+
+  return {
+    transporter: nodemailer.createTransport({
+      host,
+      port,
+      secure: Number(port) === 465,
+      auth: { user, pass },
+    }),
+    from,
   };
 };
 
@@ -73,7 +95,7 @@ export const sendEmail = async (req, res) => {
       emailLog.status = "failed";
       emailLog.error = "SMTP configuration is missing. Add SMTP settings to enable delivery.";
       await emailLog.save();
-      return res.status(500).json({ message: "Email service is not configured yet. Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM_EMAIL to enable delivery." });
+      return res.status(500).json({ message: "Email service is not configured yet. Add SMTP settings to enable delivery." });
     }
 
     const mailOptions = {
@@ -85,44 +107,34 @@ export const sendEmail = async (req, res) => {
       html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${trimmedBody.replace(/\n/g, "<br />")}</div>`,
     };
 
-    try {
-      const info = await smtpConfig.transporter.sendMail(mailOptions);
+    const info = await smtpConfig.transporter.sendMail(mailOptions);
 
-      emailLog.status = "sent";
-      emailLog.messageId = info?.messageId || null;
-      emailLog.provider = "smtp";
-      await emailLog.save();
+    emailLog.status = "sent";
+    emailLog.messageId = info?.messageId || null;
+    emailLog.provider = "smtp";
+    await emailLog.save();
 
-      return res.status(201).json({
-        _id: emailLog._id,
-        recipientEmail: normalizedRecipient,
-        recipientName: emailLog.recipientName,
-        subject: trimmedSubject,
-        body: trimmedBody,
-        message: trimmedBody,
-        status: "sent",
-        sentAt: emailLog.createdAt,
-        createdAt: emailLog.createdAt,
-      });
-    } catch (error) {
-      emailLog.status = "failed";
-      emailLog.error = error?.message || "Failed to send email.";
-      await emailLog.save();
-      return res.status(500).json({ message: error?.message || "Failed to send email." });
-    }
-  } catch (error) {
-    console.error("Email send failed:", {
-      code: error?.code,
-      message: error?.message,
+    res.status(201).json({
+      _id: emailLog._id,
+      recipientEmail: normalizedRecipient,
+      recipientName: emailLog.recipientName,
+      subject: trimmedSubject,
+      body: trimmedBody,
+      message: trimmedBody,
+      status: "sent",
+      sentAt: emailLog.createdAt,
+      createdAt: emailLog.createdAt,
     });
+  } catch (error) {
+    console.error("Email send failed:", error);
 
     if (emailLog) {
       emailLog.status = "failed";
-      emailLog.error = error?.message || "Failed to send email.";
+      emailLog.error = error.message || "Failed to send email.";
       await emailLog.save();
     }
 
-    return res.status(500).json({ message: error?.message || "Failed to send email." });
+    res.status(500).json({ message: error.message || "Failed to send email." });
   }
 };
 
