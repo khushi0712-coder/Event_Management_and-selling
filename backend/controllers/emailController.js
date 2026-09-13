@@ -89,12 +89,6 @@ export const sendEmail = async (req, res) => {
     try {
       info = await sendMailWithTimeout(smtpConfig.transporter, mailOptions);
     } catch (error) {
-      console.error("[emailController] SMTP sendMail failed", {
-        code: error?.code,
-        command: error?.command,
-        message: error?.message,
-        name: error?.name,
-      });
       throw error;
     }
 
@@ -115,15 +109,13 @@ export const sendEmail = async (req, res) => {
       createdAt: emailLog.createdAt,
     });
   } catch (error) {
-    console.error("Email send failed:", error);
-
     if (emailLog) {
       emailLog.status = "failed";
-      emailLog.error = error.message || "Failed to send email.";
+      emailLog.error = "SMTP delivery failed. Credentials are hidden.";
       await emailLog.save();
     }
 
-    res.status(500).json({ message: error.message || "Failed to send email." });
+    res.status(500).json({ message: "Unable to send email right now. Please try again later." });
   }
 };
 

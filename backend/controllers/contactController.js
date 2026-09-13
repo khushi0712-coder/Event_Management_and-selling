@@ -40,12 +40,6 @@ export const createContact = async (req, res) => {
     try {
       await sendMailWithTimeout(smtpConfig.transporter, mailOptions);
     } catch (err) {
-      console.error("[contactController] SMTP sendMail failed", {
-        code: err?.code,
-        command: err?.command,
-        message: err?.message,
-        name: err?.name,
-      });
       throw err;
     }
 
@@ -68,8 +62,7 @@ export const createContact = async (req, res) => {
       },
     });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ message: err?.message || "Failed to send message" });
+    return res.status(500).json({ message: "Unable to send message right now. Please try again later." });
   }
 };
 
