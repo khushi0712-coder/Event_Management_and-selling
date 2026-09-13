@@ -44,6 +44,13 @@ const Contact = () => {
       return;
     }
 
+    if (!emailjsServiceId || String(emailjsServiceId).trim().startsWith("your_") || !emailjsPublicKey || String(emailjsPublicKey).trim().startsWith("your_") || !emailjsContactTemplateId || String(emailjsContactTemplateId).trim().startsWith("your_")) {
+      setError("EmailJS configuration is missing.");
+      setSendStatus("error");
+      setShowModal(true);
+      return;
+    }
+
     const messageData = { ...form };
 
     setLoading(true);
@@ -52,12 +59,6 @@ const Contact = () => {
     setShowModal(true);
 
     try {
-      const emailConfigMissing = !emailjsServiceId || String(emailjsServiceId).trim().startsWith("your_") || !emailjsPublicKey || String(emailjsPublicKey).trim().startsWith("your_") || !emailjsContactTemplateId || String(emailjsContactTemplateId).trim().startsWith("your_");
-
-      if (emailConfigMissing) {
-        throw new Error("EmailJS configuration is missing.");
-      }
-
       await send(emailjsServiceId, emailjsContactTemplateId, {
         user_name: form.name,
         user_email: form.email,
@@ -92,7 +93,7 @@ const Contact = () => {
       });
     } catch (err) {
       setSendStatus("error");
-      setError("We could not send your message right now. Please try again later.");
+      setError(err?.message || "We could not send your message right now. Please try again later.");
     } finally {
       setLoading(false);
     }

@@ -83,8 +83,6 @@ const Contacts = () => {
   const sendEmail = async (event) => {
     event.preventDefault();
 
-    console.log("Email send function started");
-
     if (sending) {
       return;
     }
@@ -114,15 +112,6 @@ const Contacts = () => {
     setError("");
 
     try {
-      console.log("Email send function started");
-      console.log("EmailJS request started", {
-        service: emailjsServiceId,
-        template: emailjsAdminTemplateId,
-        publicKeyLoaded: Boolean(emailjsPublicKey),
-        recipientEmail: selectedUser.email,
-        replyTo: adminEmail,
-      });
-
       await send(emailjsServiceId, emailjsAdminTemplateId, {
         to_email: selectedUser.email,
         recipient_name: selectedUser.name || "Eventify User",
@@ -130,8 +119,6 @@ const Contacts = () => {
         message,
         reply_to: adminEmail,
       });
-
-      console.log("EmailJS success");
 
       const response = await api.post("/api/email/send", {
         userId: selectedUserId,
@@ -160,7 +147,6 @@ const Contacts = () => {
       setSelectedUserId("");
       setSearchUser("");
     } catch (err) {
-      console.log("EmailJS error", err);
       try {
         await api.post("/api/email/send", {
           userId: selectedUserId,
