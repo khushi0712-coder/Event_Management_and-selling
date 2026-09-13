@@ -29,10 +29,11 @@ const normalizeLog = (log) => {
 
 export const sendEmail = async (req, res) => {
   try {
-    const { userId, recipientEmail, subject, body, message, status, recipientName } = req.body;
+    const { userId, recipientEmail, subject, body, message, status, recipientName, error } = req.body;
     const trimmedSubject = String(subject || "").trim();
     const trimmedBody = String(body || message || "").trim();
     const targetStatus = String(status || "sent").toLowerCase();
+    const requestedError = String(error || "").trim();
 
     if (!userId && !recipientEmail) {
       return res.status(400).json({ message: "Please select a registered user before sending an email." });
@@ -91,7 +92,7 @@ export const sendEmail = async (req, res) => {
       status: normalizedStatus,
       provider: "emailjs",
       userId: recipientUser?._id,
-      error: normalizedStatus === "failed" ? "EmailJS delivery failed." : "",
+      error: normalizedStatus === "failed" ? (requestedError || "EmailJS delivery failed.") : "",
     });
 
     return res.status(201).json({

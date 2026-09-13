@@ -6,7 +6,8 @@ import api from "../../services/api";
 const Contacts = () => {
   const emailjsServiceId = import.meta.env.VITE_EMAILJS_SERVICE_ID;
   const emailjsPublicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
-  const emailjsAdminTemplateId = import.meta.env.VITE_EMAILJS_ADMIN_TEMPLATE_ID;
+  const emailjsAdminTemplateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID || import.meta.env.VITE_EMAILJS_ADMIN_TEMPLATE_ID;
+  const adminEmail = import.meta.env.VITE_ADMIN_EMAIL;
 
   if (emailjsPublicKey && !String(emailjsPublicKey).trim().toLowerCase().startsWith("your_")) {
     init({ publicKey: emailjsPublicKey });
@@ -82,6 +83,8 @@ const Contacts = () => {
   const sendEmail = async (event) => {
     event.preventDefault();
 
+    console.log("Email send function started");
+
     if (sending) {
       return;
     }
@@ -102,17 +105,33 @@ const Contacts = () => {
       return;
     }
 
+    if (!adminEmail || String(adminEmail).trim().startsWith("your_")) {
+      setError("VITE_ADMIN_EMAIL is missing.");
+      return;
+    }
+
     setSending(true);
     setError("");
 
     try {
+      console.log("Email send function started");
+      console.log("EmailJS request started", {
+        service: emailjsServiceId,
+        template: emailjsAdminTemplateId,
+        publicKeyLoaded: Boolean(emailjsPublicKey),
+        recipientEmail: selectedUser.email,
+        replyTo: adminEmail,
+      });
+
       await send(emailjsServiceId, emailjsAdminTemplateId, {
         to_email: selectedUser.email,
         recipient_name: selectedUser.name || "Eventify User",
         email_subject: subject,
         message,
-        reply_to: import.meta.env.VITE_ADMIN_EMAIL || selectedUser.email,
+        reply_to: adminEmail,
       });
+
+      console.log("EmailJS success");
 
       const response = await api.post("/api/email/send", {
         userId: selectedUserId,
@@ -141,6 +160,7 @@ const Contacts = () => {
       setSelectedUserId("");
       setSearchUser("");
     } catch (err) {
+      console.log("EmailJS error", err);
       try {
         await api.post("/api/email/send", {
           userId: selectedUserId,
@@ -150,12 +170,13 @@ const Contacts = () => {
           body: message,
           message,
           status: "failed",
+          error: err?.message || "EmailJS send failed",
         });
       } catch {
         // Keep the user-facing message to the original EmailJS failure shape.
       }
 
-      setError("We could not send your message right now. Please try again later.");
+      setError(err?.message || "We could not send your message right now. Please try again later.");
     } finally {
       setSending(false);
     }
