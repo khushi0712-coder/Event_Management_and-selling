@@ -32,6 +32,7 @@ export const getTransporter = () => {
       host,
       port,
       secure,
+      requireTLS: true,
       auth: {
         user,
         pass,
