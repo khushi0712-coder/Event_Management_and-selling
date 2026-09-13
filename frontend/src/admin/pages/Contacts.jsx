@@ -1,8 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
+import { init, send } from "@emailjs/browser";
 import { FiAlertCircle, FiMail, FiRefreshCcw, FiSearch, FiSend, FiX } from "react-icons/fi";
 import api from "../../services/api";
 
 const Contacts = () => {
+  const emailjsServiceId = import.meta.env.VITE_EMAILJS_SERVICE_ID;
+  const emailjsPublicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+  const emailjsAdminTemplateId = import.meta.env.VITE_EMAILJS_ADMIN_TEMPLATE_ID;
+
+  if (emailjsPublicKey && !String(emailjsPublicKey).trim().toLowerCase().startsWith("your_")) {
+    init({ publicKey: emailjsPublicKey });
+  }
   const [users, setUsers] = useState([]);
   const [emailLogs, setEmailLogs] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -61,42 +69,93 @@ const Contacts = () => {
     });
   }, [emailLogs, logQuery]);
 
+  const createLogPayload = (logData) => ({
+    _id: logData?._id || `${Date.now()}`,
+    recipientName: logData?.recipientName || "Eventify User",
+    recipientEmail: logData?.recipientEmail || "",
+    subject: logData?.subject || "No subject",
+    body: logData?.body || logData?.message || "",
+    status: logData?.status || "sent",
+    createdAt: logData?.createdAt || logData?.sentAt || new Date().toISOString(),
+  });
+
   const sendEmail = async (event) => {
     event.preventDefault();
+
+    if (sending) {
+      return;
+    }
 
     if (!selectedUserId || !subject.trim() || !message.trim()) {
       setError("Choose a registered user, add a subject, and write a message before sending.");
       return;
     }
 
+    const selectedUser = users.find((user) => user._id === selectedUserId) || null;
+    if (!selectedUser || !selectedUser.email) {
+      setError("The selected registered user does not have a valid email address.");
+      return;
+    }
+
+    if (!emailjsServiceId || String(emailjsServiceId).trim().startsWith("your_") || !emailjsPublicKey || String(emailjsPublicKey).trim().startsWith("your_") || !emailjsAdminTemplateId || String(emailjsAdminTemplateId).trim().startsWith("your_")) {
+      setError("EmailJS template configuration is missing.");
+      return;
+    }
+
+    setSending(true);
+    setError("");
+
     try {
-      setSending(true);
-      setError("");
+      await send(emailjsServiceId, emailjsAdminTemplateId, {
+        to_email: selectedUser.email,
+        recipient_name: selectedUser.name || "Eventify User",
+        email_subject: subject,
+        message,
+        reply_to: import.meta.env.VITE_ADMIN_EMAIL || selectedUser.email,
+      });
 
       const response = await api.post("/api/email/send", {
         userId: selectedUserId,
+        recipientEmail: selectedUser.email,
+        recipientName: selectedUser.name || "Eventify User",
         subject,
         body: message,
+        message,
+        status: "sent",
       });
 
-      const log = response.data;
-      const newLog = {
-        _id: log._id || `${Date.now()}`,
-        recipientName: log.recipientName,
-        recipientEmail: log.recipientEmail,
-        subject: log.subject,
-        body: log.body || log.message || message,
-        status: log.status || "sent",
-        createdAt: log.sentAt || log.createdAt || new Date().toISOString(),
-      };
+      const responseLog = response?.data || {};
+      const log = createLogPayload({
+        _id: responseLog._id || `${Date.now()}`,
+        recipientName: responseLog.recipientName || selectedUser.name || "Eventify User",
+        recipientEmail: responseLog.recipientEmail || selectedUser.email,
+        subject: responseLog.subject || subject,
+        body: responseLog.body || responseLog.message || message,
+        status: responseLog.status || "sent",
+        createdAt: responseLog.sentAt || responseLog.createdAt || new Date().toISOString(),
+      });
 
-      setEmailLogs((current) => [newLog, ...current]);
+      setEmailLogs((current) => [log, ...current]);
       setSubject("");
       setMessage("");
       setSelectedUserId("");
       setSearchUser("");
     } catch (err) {
-      setError(err?.response?.data?.message || "Unable to send email.");
+      try {
+        await api.post("/api/email/send", {
+          userId: selectedUserId,
+          recipientEmail: selectedUser?.email || "",
+          recipientName: selectedUser?.name || "Eventify User",
+          subject,
+          body: message,
+          message,
+          status: "failed",
+        });
+      } catch {
+        // Keep the user-facing message to the original EmailJS failure shape.
+      }
+
+      setError("We could not send your message right now. Please try again later.");
     } finally {
       setSending(false);
     }

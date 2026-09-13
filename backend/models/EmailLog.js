@@ -18,7 +18,7 @@ const emailLogSchema = new mongoose.Schema(
       enum: ["queued", "sent", "delivered", "failed", "resolved", "archived"],
       default: "queued",
     },
-    provider: { type: String, default: "smtp" },
+    provider: { type: String, default: "emailjs" },
     error: { type: String },
     messageId: { type: String, unique: true, sparse: true },
     userId: {

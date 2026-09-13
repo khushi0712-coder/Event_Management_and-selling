@@ -1,10 +1,8 @@
 ﻿import Contact from "../models/Contact.js";
-import User from "../models/User.js";
-import { getTransporter, sendMailWithTimeout } from "../utils/smtp.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
-// USER: SEND MESSAGE
+// USER: SAVE MESSAGE FROM PUBLIC CONTACT FORM
 export const createContact = async (req, res) => {
   try {
     const { name, email, subject, message } = req.body;
@@ -15,32 +13,11 @@ export const createContact = async (req, res) => {
       return res.status(400).json({ message: "Subject and message are required." });
     }
 
-    const loggedUser = await User.findById(req.user?.id || req.user?._id).select("-password");
-    const resolvedName = String(name || loggedUser?.name || "Eventify User").trim();
-    const resolvedEmail = normalizeEmail(loggedUser?.email || email);
+    const resolvedName = String(name || "Eventify User").trim();
+    const resolvedEmail = normalizeEmail(email);
 
     if (!resolvedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(resolvedEmail)) {
       return res.status(400).json({ message: "A valid registered email is required." });
-    }
-
-    const smtpConfig = getTransporter();
-    if (!smtpConfig) {
-      return res.status(500).json({ message: "SMTP configuration is missing. Add SMTP settings to enable delivery." });
-    }
-
-    const mailOptions = {
-      from: smtpConfig.from,
-      to: smtpConfig.to,
-      replyTo: resolvedEmail,
-      subject: normalizedSubject,
-      text: normalizedMessage,
-      html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${normalizedMessage.replace(/\n/g, "<br />")}</div>`,
-    };
-
-    try {
-      await sendMailWithTimeout(smtpConfig.transporter, mailOptions);
-    } catch (err) {
-      throw err;
     }
 
     const contact = await Contact.create({
@@ -48,7 +25,6 @@ export const createContact = async (req, res) => {
       email: resolvedEmail,
       subject: normalizedSubject,
       message: normalizedMessage,
-      user: loggedUser?._id || undefined,
       status: "Unread",
     });
 
@@ -56,9 +32,7 @@ export const createContact = async (req, res) => {
       message: "Message sent successfully",
       contact,
       email: {
-        to: smtpConfig.to,
-        replyTo: resolvedEmail,
-        status: "sent",
+        status: "saved",
       },
     });
   } catch (err) {

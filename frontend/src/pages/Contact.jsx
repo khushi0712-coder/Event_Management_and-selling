@@ -1,7 +1,15 @@
 import { useState } from "react";
-import { getToken } from "../services/auth";
+import { init, send } from "@emailjs/browser";
 
 const Contact = () => {
+  const emailjsServiceId = import.meta.env.VITE_EMAILJS_SERVICE_ID;
+  const emailjsPublicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+  const emailjsContactTemplateId = import.meta.env.VITE_EMAILJS_CONTACT_TEMPLATE_ID;
+
+  if (emailjsPublicKey && !String(emailjsPublicKey).trim().toLowerCase().startsWith("your_")) {
+    init({ publicKey: emailjsPublicKey });
+  }
+
   const [form, setForm] = useState({
     name: "",
     email: "",
@@ -17,10 +25,22 @@ const Contact = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const token = getToken();
+    if (loading) {
+      return;
+    }
 
-    if (!token) {
-      setError("Please login before sending a message.");
+    const requiredFields = [form.name, form.email, form.subject, form.message];
+    if (requiredFields.some((value) => String(value).trim() === "")) {
+      setError("Please complete all required fields.");
+      setSendStatus("error");
+      setShowModal(true);
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      setError("Please enter a valid email address.");
+      setSendStatus("error");
+      setShowModal(true);
       return;
     }
 
@@ -28,19 +48,30 @@ const Contact = () => {
 
     setLoading(true);
     setError("");
-
-    // Card immediately show hoga
     setSendStatus("sending");
     setShowModal(true);
 
     try {
+      const emailConfigMissing = !emailjsServiceId || String(emailjsServiceId).trim().startsWith("your_") || !emailjsPublicKey || String(emailjsPublicKey).trim().startsWith("your_") || !emailjsContactTemplateId || String(emailjsContactTemplateId).trim().startsWith("your_");
+
+      if (emailConfigMissing) {
+        throw new Error("EmailJS configuration is missing.");
+      }
+
+      await send(emailjsServiceId, emailjsContactTemplateId, {
+        user_name: form.name,
+        user_email: form.email,
+        message_subject: form.subject,
+        message: form.message,
+        submission_date: new Date().toISOString(),
+      });
+
       const response = await fetch(
         `${import.meta.env.VITE_API_URL}/api/contact`,
         {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(messageData),
         }
@@ -49,12 +80,10 @@ const Contact = () => {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        throw new Error(data?.message || "Message could not be sent.");
+        throw new Error(data?.message || "Unable to save contact message.");
       }
 
-      // Backend success ke baad final success state
       setSendStatus("success");
-
       setForm({
         name: "",
         email: "",
@@ -63,7 +92,7 @@ const Contact = () => {
       });
     } catch (err) {
       setSendStatus("error");
-      setError(err.message || "Something went wrong.");
+      setError("We could not send your message right now. Please try again later.");
     } finally {
       setLoading(false);
     }
@@ -181,15 +210,13 @@ const Contact = () => {
                   <span className="confetti confetti-six"></span>
                 </div>
 
-                <h2>Your Message is</h2>
+                <h2>Thank you for contacting Eventify.</h2>
                 <h2 className="success-heading">
-                  Sent Successfully!
+                  Your message has been sent successfully.
                 </h2>
 
                 <p>
-                  Thank you for contacting us.
-                  <br />
-                  Our team will get back to you soon.
+                  Thank you for contacting Eventify. Your message has been sent successfully.
                 </p>
 
                 <button

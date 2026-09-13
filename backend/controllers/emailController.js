@@ -1,6 +1,5 @@
 import EmailLog from "../models/EmailLog.js";
 import User from "../models/User.js";
-import { getTransporter, sendMailWithTimeout } from "../utils/smtp.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
@@ -29,14 +28,13 @@ const normalizeLog = (log) => {
 };
 
 export const sendEmail = async (req, res) => {
-  let emailLog = null;
-
   try {
-    const { userId, recipientEmail, subject, body, message } = req.body;
+    const { userId, recipientEmail, subject, body, message, status, recipientName } = req.body;
     const trimmedSubject = String(subject || "").trim();
     const trimmedBody = String(body || message || "").trim();
+    const targetStatus = String(status || "sent").toLowerCase();
 
-    if (!userId) {
+    if (!userId && !recipientEmail) {
       return res.status(400).json({ message: "Please select a registered user before sending an email." });
     }
 
@@ -44,78 +42,71 @@ export const sendEmail = async (req, res) => {
       return res.status(400).json({ message: "Subject and message are required." });
     }
 
-    const recipientUser = await User.findById(userId);
-
-    if (!recipientUser) {
-      return res.status(404).json({ message: "Selected user was not found." });
+    let recipientUser = null;
+    if (userId) {
+      recipientUser = await User.findById(userId);
+      if (!recipientUser) {
+        return res.status(404).json({ message: "Selected user was not found." });
+      }
     }
 
-    const normalizedRecipient = normalizeEmail(recipientUser.email || recipientEmail);
+    const selectedRecipient = recipientUser?.email || recipientEmail || "";
+    const normalizedRecipient = normalizeEmail(selectedRecipient);
 
     if (!normalizedRecipient || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedRecipient)) {
       return res.status(400).json({ message: "The selected user does not have a valid email address." });
     }
 
-    emailLog = await EmailLog.create({
+    const normalizedStatus = targetStatus === "failed" ? "failed" : "sent";
+    const normalizedName = recipientName || recipientUser?.name || "Eventify User";
+
+    const existingLog = await EmailLog.findOne({
+      recipientEmail: normalizedRecipient,
+      recipientName: normalizedName,
+      subject: trimmedSubject,
+      body: trimmedBody,
+      status: normalizedStatus,
+    });
+
+    if (existingLog) {
+      return res.status(200).json({
+        _id: existingLog._id,
+        recipientEmail: normalizedRecipient,
+        recipientName: normalizedName,
+        subject: trimmedSubject,
+        body: trimmedBody,
+        message: trimmedBody,
+        status: normalizedStatus,
+        sentAt: existingLog.createdAt,
+        createdAt: existingLog.createdAt,
+      });
+    }
+
+    const emailLog = await EmailLog.create({
       direction: "outbound",
-      recipientName: recipientUser.name || "Eventify User",
+      recipientName: normalizedName,
       recipientEmail: normalizedRecipient,
       subject: trimmedSubject,
       body: trimmedBody,
-      status: "queued",
-      provider: process.env.SMTP_HOST ? "smtp" : "not-configured",
-      userId: recipientUser._id,
+      status: normalizedStatus,
+      provider: "emailjs",
+      userId: recipientUser?._id,
+      error: normalizedStatus === "failed" ? "EmailJS delivery failed." : "",
     });
 
-    const smtpConfig = getTransporter();
-
-    if (!smtpConfig) {
-      emailLog.status = "failed";
-      emailLog.error = "SMTP configuration is missing. Add SMTP settings to enable delivery.";
-      await emailLog.save();
-      return res.status(500).json({ message: "Email service is not configured yet. Add SMTP settings to enable delivery." });
-    }
-
-    const mailOptions = {
-      from: smtpConfig.from,
-      to: normalizedRecipient,
-      replyTo: process.env.ADMIN_EMAIL || smtpConfig.from,
-      subject: trimmedSubject,
-      text: trimmedBody,
-      html: `<div style="font-family: Arial, sans-serif; line-height: 1.6; color: #0f172a;">${trimmedBody.replace(/\n/g, "<br />")}</div>`,
-    };
-
-    let info;
-    try {
-      info = await sendMailWithTimeout(smtpConfig.transporter, mailOptions);
-    } catch (error) {
-      throw error;
-    }
-
-    emailLog.status = "sent";
-    emailLog.messageId = info?.messageId || null;
-    emailLog.provider = "smtp";
-    await emailLog.save();
-
-    res.status(201).json({
+    return res.status(201).json({
       _id: emailLog._id,
       recipientEmail: normalizedRecipient,
-      recipientName: emailLog.recipientName,
+      recipientName: normalizedName,
       subject: trimmedSubject,
       body: trimmedBody,
       message: trimmedBody,
-      status: "sent",
+      status: normalizedStatus,
       sentAt: emailLog.createdAt,
       createdAt: emailLog.createdAt,
     });
   } catch (error) {
-    if (emailLog) {
-      emailLog.status = "failed";
-      emailLog.error = "SMTP delivery failed. Credentials are hidden.";
-      await emailLog.save();
-    }
-
-    res.status(500).json({ message: "Unable to send email right now. Please try again later." });
+    return res.status(500).json({ message: "Unable to send email right now. Please try again later." });
   }
 };
 

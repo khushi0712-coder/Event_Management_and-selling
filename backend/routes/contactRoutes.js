@@ -7,8 +7,8 @@ import protect from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
-// User sends message
-router.post("/", protect, createContact);
+// Public contact message capture: save contact and let frontend EmailJS send separately.
+router.post("/", createContact);
 
 // Admin views messages
 router.get("/admin", protect, getAllContacts);

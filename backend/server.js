@@ -1,13 +1,9 @@
 import express from "express";
 import path from "path";
 import { fileURLToPath } from "url";
-import dns from "node:dns";
 import dotenv from "dotenv";
 import cors from "cors";
 import connectDB from "./config/db.js";
-
-// Force Gmail hostname resolution to IPv4 first to avoid ENETUNREACH / IPv6 transport failures on Render.
-dns.setDefaultResultOrder("ipv4first");
 
 import authRoutes from "./routes/authRoutes.js";
 import bookingRoutes from "./routes/bookingRoutes.js";
