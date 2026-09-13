@@ -1,6 +1,6 @@
 ﻿import Contact from "../models/Contact.js";
 import User from "../models/User.js";
-import { getTransporter, sendMailWithTimeout } from "../utils/smtp.js";
+import { getTransporter } from "../utils/smtp.js";
 
 const normalizeEmail = (value) => String(value || "").trim().toLowerCase();
 
@@ -25,17 +25,8 @@ export const createContact = async (req, res) => {
 
     const smtpConfig = getTransporter();
     if (!smtpConfig) {
-      return res.status(500).json({ message: "SMTP configuration is missing. Add SMTP settings to enable delivery." });
+      return res.status(500).json({ message: "Email service is not configured yet. Add SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, and SMTP_FROM_EMAIL to enable delivery." });
     }
-
-    const contact = await Contact.create({
-      name: resolvedName,
-      email: resolvedEmail,
-      subject: normalizedSubject,
-      message: normalizedMessage,
-      user: loggedUser?._id || undefined,
-      status: "Unread",
-    });
 
     const mailOptions = {
       from: smtpConfig.from,
@@ -47,7 +38,16 @@ export const createContact = async (req, res) => {
     };
 
     try {
-      await sendMailWithTimeout(smtpConfig.transporter, mailOptions, 15000);
+      await smtpConfig.transporter.sendMail(mailOptions);
+
+      const contact = await Contact.create({
+        name: resolvedName,
+        email: resolvedEmail,
+        subject: normalizedSubject,
+        message: normalizedMessage,
+        user: loggedUser?._id || undefined,
+        status: "Unread",
+      });
 
       return res.status(201).json({
         message: "Message sent successfully",
@@ -59,9 +59,10 @@ export const createContact = async (req, res) => {
         },
       });
     } catch (err) {
-      console.error("Contact message email failed:", err);
-      contact.status = "Unread";
-      await contact.save();
+      console.error("Contact message email failed:", {
+        code: err?.code,
+        message: err?.message,
+      });
       return res.status(500).json({ message: err?.message || "Failed to send message" });
     }
   } catch (err) {
