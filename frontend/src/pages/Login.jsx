@@ -1301,7 +1301,7 @@ const Login = () => {
 
                 </label>
 
-                <button
+                {/* <button
                   type="button"
                   className="eventify-forgot"
                   onClick={() =>
@@ -1311,7 +1311,7 @@ const Login = () => {
                   }
                 >
                   Forgot password?
-                </button>
+                </button> */}
 
               </div>
 
